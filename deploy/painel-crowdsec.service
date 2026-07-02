@@ -1,0 +1,24 @@
+[Unit]
+Description=Mini SOC - Security Operations Dashboard (CrowdSec + Nginx)
+Documentation=file:///opt/painel-crowdsec/README.md
+After=network-online.target crowdsec.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Roda como root para poder executar cscli e ler /var/lib/crowdsec e /var/log/nginx.
+User=root
+Group=root
+WorkingDirectory=/opt/painel-crowdsec
+EnvironmentFile=/opt/painel-crowdsec/.env
+ExecStart=/opt/painel-crowdsec/.venv/bin/python /opt/painel-crowdsec/app.py
+Restart=on-failure
+RestartSec=3
+# Endurecimento (mantenha compatível com leitura do DB do CrowdSec e logs):
+NoNewPrivileges=false
+ProtectSystem=full
+ReadWritePaths=/opt/painel-crowdsec/data
+# O DB do CrowdSec e os logs são lidos somente-leitura; cscli precisa de acesso.
+
+[Install]
+WantedBy=multi-user.target

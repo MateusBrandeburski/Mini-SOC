@@ -1,0 +1,2177 @@
+<!--
+  Mini SOC — Security Operations Dashboard — SPA (single-file, zero-build).
+
+  Front-end de página única servido por app.py em "/". Todo o estado vive em um
+  objeto JS em memória (SEM localStorage/sessionStorage). Consome a API descrita
+  no CONTRATO. Tema claro (DaisyUI "cupcake"). Textos em pt-BR.
+
+  Estrutura:
+    - Navbar fixo: título, indicador de saúde, botão sair, abas principais.
+    - Aba "CrowdSec": cards de estatística, série temporal, rankings, tabela de
+      decisões com ações, sub-painéis "Alertas" e "Auditoria".
+    - Aba "Logs Nginx": seletor de arquivo, filtros, tabela, tail ao vivo (SSE),
+      estatísticas em gráficos.
+    - Overlay de login exibido quando qualquer /api responde 401.
+    - Helpers reutilizáveis: apiFetch (trata 401 + JSON + erros), toast, modal de
+      banir compartilhado entre abas, destruição de gráficos antes de recriar.
+-->
+<title>Mini SOC — Security Operations Dashboard</title>
+<link rel="icon" type="image/png" sizes="64x64" href="/static/favicon-64.png" />
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
+<link rel="apple-touch-icon" href="/static/favicon-64.png" />
+
+<style>
+  /* Paleta de gráficos calibrada para o tema claro DaisyUI "cupcake"
+     (superfície creme, cards em base-200 ≈ #efeae6).
+     Categóricas: azul, água, amarelo, verde, violeta, vermelho, magenta, laranja.
+     Estas cores são usadas SOMENTE nas marcas dos gráficos; textos usam os tokens
+     de tinta do tema. Grade/eixos discretos para não competir com as marcas. */
+  :root {
+    --viz-surface: #efeae6;
+    --viz-grid:    #e0d8d1;
+    --viz-axis:    #cabfb6;
+    --viz-muted:   #8b7f76;
+    --viz-ink-2:   #4a4038;
+    --viz-s1: #2f6fd0; /* azul    */
+    --viz-s2: #12876a; /* água    */
+    --viz-s3: #b3730a; /* amarelo/âmbar */
+    --viz-s4: #2f8f2f; /* verde   */
+    --viz-s5: #7b6ee0; /* violeta */
+    --viz-s6: #d64545; /* vermelho*/
+    --viz-s7: #c23e73; /* magenta */
+    --viz-s8: #c85a1f; /* laranja */
+    --st-good:    #2f8f2f;
+    --st-warning: #d18b00;
+    --st-critical:#d64545;
+  }
+
+  html, body { height: 100%; }
+  body { overflow-x: hidden; }
+
+  /* Nunca deixar o body rolar horizontalmente; conteúdo largo rola no próprio
+     contêiner. */
+  .table-scroll { overflow-x: auto; max-width: 100%; }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* Indicador de saúde (bolinha). */
+  .health-dot {
+    width: 0.75rem; height: 0.75rem; border-radius: 9999px;
+    display: inline-block; background: var(--viz-muted);
+    box-shadow: 0 0 0 0 rgba(0,0,0,0);
+    transition: background .3s, box-shadow .3s;
+  }
+  .health-dot.ok   { background: var(--st-good);    box-shadow: 0 0 8px 1px rgba(12,163,12,.6); }
+  .health-dot.bad  { background: var(--st-critical);box-shadow: 0 0 8px 1px rgba(208,59,59,.6); }
+  .health-dot.warn { background: var(--st-warning); box-shadow: 0 0 8px 1px rgba(250,178,25,.5); }
+
+  /* Área de tail ao vivo. */
+  #liveArea {
+    max-height: 22rem; overflow-y: auto; overflow-x: auto;
+    font-size: 0.78rem; line-height: 1.35rem;
+  }
+  #liveArea .live-line { white-space: pre; padding: 0.05rem 0; }
+
+  /* Detalhe expansível de auditoria/logs. */
+  .expand-cell pre {
+    white-space: pre-wrap; word-break: break-word; margin: 0;
+    font-size: 0.72rem; max-height: 18rem; overflow: auto;
+  }
+
+  .toast-stack { z-index: 60; }
+  .modal { z-index: 70; }
+
+  .chart-box { position: relative; width: 100%; }
+  .chart-box canvas { max-width: 100%; }
+
+  /* Rota/UA truncados nas tabelas. */
+  .truncate-cell { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .truncate-ua   { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Estado de carregamento leve. */
+  .is-loading { opacity: .5; pointer-events: none; }
+
+  /* Logo oficial: troca conforme o tema (claro usa o escudo escuro; o dark
+     usa a variante clara). Marcado no <html data-theme>. */
+  .logo-dark { display: none; }
+  html[data-theme="dark"] .logo-light { display: none; }
+  html[data-theme="dark"] .logo-dark  { display: inline-block; }
+  .logo-img { object-fit: contain; }
+
+  /* Documentação renderizada de Markdown (modal de ajuda). */
+  .prose-doc { font-size: .93rem; line-height: 1.6; }
+  .prose-doc h2 { font-size: 1.35rem; font-weight: 700; margin: .2rem 0 .6rem; }
+  .prose-doc h3 { font-size: 1.02rem; font-weight: 650; margin: 1.3rem 0 .5rem; }
+  .prose-doc p { margin: .5rem 0; }
+  .prose-doc ul { margin: .5rem 0; padding-left: 1.25rem; list-style: disc; }
+  .prose-doc li { margin: .25rem 0; }
+  .prose-doc code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .85em; background: hsl(var(--b3, var(--b2))/.6); padding: .1em .4em; border-radius: 4px; }
+  .prose-doc table { width: 100%; border-collapse: collapse; margin: .75rem 0; font-size: .86rem; display: block; overflow-x: auto; }
+  .prose-doc th, .prose-doc td { border: 1px solid hsl(var(--bc)/.15); padding: .5rem .65rem; text-align: left; vertical-align: top; }
+  .prose-doc th { background: hsl(var(--b2)); font-weight: 650; }
+  .prose-doc strong { font-weight: 700; }
+</style>
+
+<!-- Navbar fixo. A barra/borda vão de ponta a ponta; o CONTEÚDO interno fica no
+     mesmo container (max-w-[1400px]) das abas e do main, para alinhar com eles. -->
+<header class="bg-base-100/90 backdrop-blur sticky top-0 z-50 border-b border-base-300">
+  <div class="navbar min-h-16 gap-2 px-2 sm:px-4 max-w-[1400px] mx-auto">
+    <div class="flex-1 flex items-center gap-3 min-w-0">
+      <div class="shrink-0 w-10 h-10 flex items-center justify-center">
+        <img src="/static/logo-light.png" alt="Mini SOC" class="logo-img logo-light w-10 h-10" />
+        <img src="/static/logo-dark.png"  alt="Mini SOC" class="logo-img logo-dark  w-10 h-10" />
+      </div>
+      <div class="min-w-0 leading-tight">
+        <div class="text-base sm:text-lg font-bold truncate">Mini SOC</div>
+        <div class="text-[11px] opacity-60 truncate hidden sm:block">Security Operations Dashboard</div>
+      </div>
+      <span id="healthDot" class="health-dot ml-1 sm:ml-3 shrink-0" title="Verificando saúde…"></span>
+    </div>
+    <div class="flex-none flex items-center gap-1.5">
+      <!-- Alternador de tema (claro/escuro) -->
+      <button id="btnTheme" class="btn btn-sm btn-ghost btn-circle" title="Alternar tema claro/escuro">
+        <svg id="iconSun" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg id="iconMoon" class="w-5 h-5 hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <button id="btnRefreshAll" class="btn btn-sm btn-ghost btn-circle" title="Atualizar tudo">↻</button>
+      <button id="btnHelp" class="btn btn-sm btn-ghost btn-circle" title="Ajuda / documentação">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
+      <button id="btnLogout" class="btn btn-sm btn-ghost gap-1.5" title="Encerrar sessão">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span class="hidden sm:inline">Sair</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- Abas principais (wide, alinhadas com o conteúdo abaixo) -->
+<div class="px-2 sm:px-4 pt-4 max-w-[1400px] mx-auto">
+  <div role="tablist" class="tabs tabs-boxed bg-base-200 p-1.5 grid grid-cols-2 gap-1.5">
+    <a role="tab" class="tab tab-lg gap-2 font-semibold tab-active" data-main-tab="crowdsec">
+      <img src="/static/crowdsec.png" alt="" class="w-5 h-5 shrink-0" /> CrowdSec
+    </a>
+    <a role="tab" class="tab tab-lg gap-2 font-semibold" data-main-tab="logs">
+      <img src="/static/icon-nginx.svg" alt="" class="w-5 h-5 shrink-0" /> Logs Nginx
+    </a>
+  </div>
+</div>
+
+<main class="px-2 sm:px-4 py-4 space-y-6 max-w-[1400px] mx-auto">
+
+  <!-- ================================================================ ABA CROWDSEC -->
+  <section data-panel="crowdsec">
+
+    <!-- Sub-abas do painel CrowdSec -->
+    <div role="tablist" class="tabs tabs-bordered mb-4">
+      <a role="tab" class="tab tab-active" data-sub-tab="painel">Painel</a>
+      <a role="tab" class="tab" data-sub-tab="decisoes">Decisões</a>
+      <a role="tab" class="tab" data-sub-tab="alertas">Alertas</a>
+      <a role="tab" class="tab" data-sub-tab="auditoria">Auditoria</a>
+    </div>
+
+    <!-- ---- Sub-painel: Painel (stats + série + rankings) ---- -->
+    <div data-sub-panel="painel" class="space-y-6">
+
+      <!-- Cards de estatística -->
+      <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div class="stat bg-base-200 rounded-box p-4">
+          <div class="stat-title text-xs">Bloqueados agora</div>
+          <div class="stat-value text-2xl tnum" id="statActiveBans">—</div>
+        </div>
+        <div class="stat bg-base-200 rounded-box p-4">
+          <div class="stat-title text-xs">IPs únicos ativos</div>
+          <div class="stat-value text-2xl tnum" id="statActiveIps">—</div>
+        </div>
+        <div class="stat bg-base-200 rounded-box p-4">
+          <div class="stat-title text-xs">Novos hoje</div>
+          <div class="stat-value text-2xl tnum" id="statNewToday">—</div>
+        </div>
+        <div class="stat bg-base-200 rounded-box p-4">
+          <div class="stat-title text-xs">Últimas 24h</div>
+          <div class="stat-value text-2xl tnum" id="statLast24h">—</div>
+        </div>
+        <div class="stat bg-base-200 rounded-box p-4">
+          <div class="stat-title text-xs">Total decisões</div>
+          <div class="stat-value text-2xl tnum" id="statTotalDecisions">—</div>
+        </div>
+        <div class="stat bg-base-200 rounded-box p-4">
+          <div class="stat-title text-xs">Total alertas</div>
+          <div class="stat-value text-2xl tnum" id="statTotalAlerts">—</div>
+        </div>
+      </div>
+
+      <!-- Série temporal -->
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title text-base">Bloqueios por dia</h2>
+            <div class="flex flex-wrap items-center gap-2">
+              <select id="tsDays" class="select select-sm select-bordered">
+                <option value="7">7 dias</option>
+                <option value="30" selected>30 dias</option>
+                <option value="90">90 dias</option>
+              </select>
+              <select id="tsOrigin" class="select select-sm select-bordered">
+                <option value="">Todas as origens</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart-box" style="height: 280px;">
+            <canvas id="chartTimeseries"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rankings -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Top países</h2>
+            <div class="table-scroll">
+              <table class="table table-sm">
+                <tbody id="topCountries"><tr><td class="opacity-60">carregando…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Top cenários</h2>
+            <div class="table-scroll">
+              <table class="table table-sm">
+                <tbody id="topScenarios"><tr><td class="opacity-60">carregando…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Top ASN</h2>
+            <div class="table-scroll">
+              <table class="table table-sm">
+                <tbody id="topAsn"><tr><td class="opacity-60">carregando…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Sub-painel: Decisões ---- -->
+    <div data-sub-panel="decisoes" class="space-y-4 hidden">
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4 gap-3">
+          <div class="flex flex-wrap items-end justify-between gap-2">
+            <div class="flex flex-wrap items-end gap-2">
+              <label class="form-control">
+                <span class="label-text text-xs">IP / valor</span>
+                <input id="decSearch" type="text" placeholder="ex.: 203.0.113" class="input input-sm input-bordered w-40" />
+              </label>
+              <label class="form-control">
+                <span class="label-text text-xs">Tipo</span>
+                <select id="decType" class="select select-sm select-bordered">
+                  <option value="">Todos</option>
+                  <option value="ban">ban</option>
+                  <option value="captcha">captcha</option>
+                </select>
+              </label>
+              <label class="form-control">
+                <span class="label-text text-xs">Origem</span>
+                <select id="decOrigin" class="select select-sm select-bordered">
+                  <option value="">Todas</option>
+                </select>
+              </label>
+              <label class="label cursor-pointer gap-2">
+                <input id="decActiveOnly" type="checkbox" class="checkbox checkbox-sm" checked />
+                <span class="label-text text-xs">só ativos</span>
+              </label>
+              <button id="decApply" class="btn btn-sm btn-primary">Aplicar</button>
+            </div>
+            <button id="btnBanGlobal" class="btn btn-sm btn-error">Banir IP</button>
+          </div>
+
+          <div class="table-scroll">
+            <table class="table table-sm table-zebra">
+              <thead>
+                <tr>
+                  <th>IP</th><th>País</th><th>ASN</th><th>Cenário</th><th>Tipo</th>
+                  <th>Origem</th><th>Criado</th><th>Expira em</th><th>Alert ID</th><th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="decBody">
+                <tr><td colspan="10" class="text-center opacity-60 py-6">carregando…</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span id="decInfo" class="text-xs opacity-70"></span>
+            <div class="join">
+              <button id="decPrev" class="btn btn-sm join-item">«</button>
+              <button class="btn btn-sm join-item pointer-events-none" id="decPageLbl">1</button>
+              <button id="decNext" class="btn btn-sm join-item">»</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Sub-painel: Alertas ---- -->
+    <div data-sub-panel="alertas" class="space-y-4 hidden">
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4 gap-3">
+          <h2 class="card-title text-base">Configuração de alertas</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="label cursor-pointer justify-start gap-3">
+              <input id="alEnabled" type="checkbox" class="toggle toggle-primary" />
+              <span class="label-text">Alertas habilitados</span>
+            </label>
+            <div></div>
+            <label class="form-control">
+              <span class="label-text text-xs">Origens (separadas por vírgula)</span>
+              <input id="alOrigins" type="text" class="input input-sm input-bordered" placeholder="crowdsec, cscli" />
+            </label>
+            <label class="form-control">
+              <span class="label-text text-xs">Cenários (vírgula; vazio = todos)</span>
+              <input id="alScenarios" type="text" class="input input-sm input-bordered" placeholder="crowdsecurity/http-probing" />
+            </label>
+            <label class="form-control">
+              <span class="label-text text-xs">Limiar: nº de alertas (0 = desativado)</span>
+              <input id="alThreshCount" type="number" min="0" class="input input-sm input-bordered" />
+            </label>
+            <label class="form-control">
+              <span class="label-text text-xs">Janela do limiar (minutos)</span>
+              <input id="alThreshMin" type="number" min="1" class="input input-sm input-bordered" />
+            </label>
+          </div>
+
+          <div class="divider my-1 text-xs opacity-70">Canais</div>
+          <div class="flex flex-wrap gap-6">
+            <label class="label cursor-pointer gap-2">
+              <input id="alChWebhook" type="checkbox" class="checkbox checkbox-sm" />
+              <span class="label-text">Webhook</span>
+            </label>
+            <label class="label cursor-pointer gap-2">
+              <input id="alChTelegram" type="checkbox" class="checkbox checkbox-sm" />
+              <span class="label-text">Telegram</span>
+            </label>
+            <label class="label cursor-pointer gap-2">
+              <input id="alChEmail" type="checkbox" class="checkbox checkbox-sm" />
+              <span class="label-text">E-mail</span>
+            </label>
+          </div>
+
+          <div class="flex flex-wrap gap-2 pt-1">
+            <button id="alSave" class="btn btn-sm btn-primary">Salvar</button>
+            <button id="alTest" class="btn btn-sm btn-outline">Enviar teste</button>
+            <span id="alTestResult" class="text-xs self-center opacity-80"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4">
+          <h2 class="card-title text-base">Histórico de alertas</h2>
+          <div class="table-scroll">
+            <table class="table table-sm table-zebra">
+              <thead>
+                <tr><th>Quando</th><th>IP</th><th>País</th><th>ASN</th><th>Cenário</th><th>Origem</th><th>Duração</th><th>Canais</th></tr>
+              </thead>
+              <tbody id="alHistBody">
+                <tr><td colspan="8" class="text-center opacity-60 py-6">carregando…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Sub-painel: Auditoria ---- -->
+    <div data-sub-panel="auditoria" class="space-y-4 hidden">
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4">
+          <div class="flex items-center justify-between">
+            <h2 class="card-title text-base">Auditoria de ações</h2>
+            <button id="audRefresh" class="btn btn-sm btn-ghost">↻</button>
+          </div>
+          <div class="table-scroll">
+            <table class="table table-sm table-zebra">
+              <thead>
+                <tr><th></th><th>Quando</th><th>Ator</th><th>Ação</th><th>Alvo</th><th>Detalhe</th><th>Saída</th><th>OK</th></tr>
+              </thead>
+              <tbody id="audBody">
+                <tr><td colspan="8" class="text-center opacity-60 py-6">carregando…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span id="audInfo" class="text-xs opacity-70"></span>
+            <div class="join">
+              <button id="audPrev" class="btn btn-sm join-item">«</button>
+              <button class="btn btn-sm join-item pointer-events-none" id="audPageLbl">1</button>
+              <button id="audNext" class="btn btn-sm join-item">»</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ================================================================ ABA LOGS -->
+  <section data-panel="logs" class="hidden">
+
+    <!-- Sub-abas da aba Logs (namespace próprio: data-log-tab / data-log-panel) -->
+    <div role="tablist" class="tabs tabs-bordered mb-4">
+      <a role="tab" class="tab gap-1.5 tab-active" data-log-tab="listagem">Listagem</a>
+      <a role="tab" class="tab gap-1.5" data-log-tab="estatisticas">Estatísticas</a>
+    </div>
+
+    <!-- ---- Sub-painel: Listagem (seletor + filtros + tail + tabela) ---- -->
+    <div data-log-panel="listagem" class="space-y-4">
+
+    <div class="card bg-base-200 shadow">
+      <div class="card-body p-4 gap-3">
+        <div class="flex flex-wrap items-end gap-2 justify-between">
+          <label class="form-control">
+            <span class="label-text text-xs">Arquivo de log</span>
+            <select id="logFile" class="select select-sm select-bordered w-72 max-w-full">
+              <option value="">carregando arquivos…</option>
+            </select>
+          </label>
+          <div class="flex items-center gap-2">
+            <label class="label cursor-pointer gap-2">
+              <input id="liveToggle" type="checkbox" class="toggle toggle-success" />
+              <span class="label-text text-xs">Tail ao vivo</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Filtros -->
+        <div class="flex flex-wrap items-end gap-2">
+          <label class="form-control">
+            <span class="label-text text-xs">IP</span>
+            <input id="lgIp" type="text" class="input input-sm input-bordered w-32" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Status</span>
+            <input id="lgStatus" type="text" placeholder="404 ou 4xx" class="input input-sm input-bordered w-24" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Método</span>
+            <select id="lgMethod" class="select select-sm select-bordered">
+              <option value="">Todos</option>
+              <option>GET</option><option>POST</option><option>PUT</option>
+              <option>DELETE</option><option>HEAD</option><option>PATCH</option>
+              <option>OPTIONS</option><option>CONNECT</option><option>TRACE</option>
+            </select>
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Rota (contém)</span>
+            <input id="lgPath" type="text" class="input input-sm input-bordered w-40" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">User-Agent</span>
+            <input id="lgUa" type="text" class="input input-sm input-bordered w-40" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Texto livre (q)</span>
+            <input id="lgQ" type="text" class="input input-sm input-bordered w-40" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Linhas lidas</span>
+            <select id="lgLines" class="select select-sm select-bordered">
+              <option value="1000">1.000</option>
+              <option value="2000" selected>2.000</option>
+              <option value="5000">5.000</option>
+              <option value="20000">20.000</option>
+            </select>
+          </label>
+          <button id="lgApply" class="btn btn-sm btn-primary">Aplicar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Área de tail ao vivo -->
+    <div id="liveWrap" class="card bg-base-200 shadow hidden">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="card-title text-base">Tail ao vivo</h2>
+          <div class="flex items-center gap-2">
+            <span id="liveStatus" class="badge badge-ghost badge-sm">parado</span>
+            <button id="liveClear" class="btn btn-xs btn-ghost">Limpar</button>
+          </div>
+        </div>
+        <div id="liveArea" class="mono bg-base-300 rounded-box p-2 mt-2">
+          <div class="opacity-50 live-line">Aguardando linhas…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabela de logs -->
+    <div class="card bg-base-200 shadow">
+      <div class="card-body p-4">
+        <div class="table-scroll">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr>
+                <th>IP</th><th>Acesso / Domínio</th><th>Hora</th><th>Método</th><th>Rota</th><th>Status</th>
+                <th>Tamanho</th><th>UA</th><th></th><th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="lgBody">
+              <tr><td colspan="10" class="text-center opacity-60 py-6">selecione um arquivo…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex items-center justify-between gap-2 flex-wrap mt-2">
+          <span id="lgInfo" class="text-xs opacity-70"></span>
+          <div class="join">
+            <button id="lgPrev" class="btn btn-sm join-item">«</button>
+            <button class="btn btn-sm join-item pointer-events-none" id="lgPageLbl">1</button>
+            <button id="lgNext" class="btn btn-sm join-item">»</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- /sub-painel listagem -->
+
+    <!-- ---- Sub-painel: Estatísticas (gráficos + tops do arquivo) ---- -->
+    <div data-log-panel="estatisticas" class="space-y-4 hidden">
+
+      <!-- Barra de contexto do arquivo analisado -->
+      <div class="card bg-base-200 shadow">
+        <div class="card-body p-4 flex-row flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-sm opacity-70">Arquivo:</span>
+            <span id="lgStatsFile" class="badge badge-neutral badge-sm mono">—</span>
+            <span id="lgStatsMeta" class="text-xs opacity-60"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="form-control">
+              <select id="lgStatsLines" class="select select-xs select-bordered">
+                <option value="2000">2.000 linhas</option>
+                <option value="5000" selected>5.000 linhas</option>
+                <option value="20000">20.000 linhas</option>
+                <option value="50000">50.000 linhas</option>
+              </select>
+            </label>
+            <button id="lgStatsRefresh" class="btn btn-sm btn-ghost btn-circle" title="Recalcular">↻</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gráficos -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Requisições ao longo do tempo</h2>
+            <div class="chart-box" style="height: 260px;"><canvas id="chartLogOverTime"></canvas></div>
+          </div>
+        </div>
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Distribuição de status</h2>
+            <div class="chart-box" style="height: 260px;"><canvas id="chartLogStatus"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tops -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Top IPs</h2>
+            <div class="table-scroll"><table class="table table-sm"><tbody id="logTopIps"></tbody></table></div>
+          </div>
+        </div>
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Top rotas</h2>
+            <div class="table-scroll"><table class="table table-sm"><tbody id="logTopPaths"></tbody></table></div>
+          </div>
+        </div>
+        <div class="card bg-base-200 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base">Top user-agents</h2>
+            <div class="table-scroll"><table class="table table-sm"><tbody id="logTopUas"></tbody></table></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /sub-painel estatísticas -->
+  </section>
+</main>
+
+<!-- ============================================================ MODAL: banir IP -->
+<dialog id="banModal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Banir IP</h3>
+    <p class="text-sm opacity-70 mt-1">Cria uma decisão de bloqueio via cscli.</p>
+    <div class="space-y-3 mt-3">
+      <label class="form-control">
+        <span class="label-text text-xs">IP ou CIDR</span>
+        <input id="banValue" type="text" placeholder="203.0.113.5 ou 203.0.113.0/24" class="input input-bordered input-sm mono" />
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs">Duração</span>
+        <div class="flex gap-2">
+          <select id="banDurPreset" class="select select-sm select-bordered">
+            <option value="1h">1 hora</option>
+            <option value="4h" selected>4 horas</option>
+            <option value="24h">24 horas</option>
+            <option value="168h">7 dias</option>
+            <option value="720h">30 dias</option>
+            <option value="87600h">Permanente</option>
+            <option value="__free">Personalizado…</option>
+          </select>
+          <input id="banDurFree" type="text" placeholder="ex.: 1h30m" class="input input-sm input-bordered mono flex-1 hidden" />
+        </div>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs">Tipo</span>
+        <select id="banType" class="select select-sm select-bordered">
+          <option value="ban">ban</option>
+          <option value="captcha">captcha</option>
+        </select>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs">Motivo</span>
+        <input id="banReason" type="text" placeholder="painel: banimento manual" class="input input-sm input-bordered" />
+      </label>
+    </div>
+    <div class="modal-action">
+      <button id="banConfirm" class="btn btn-sm btn-error">Banir</button>
+      <form method="dialog"><button class="btn btn-sm">Cancelar</button></form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>fechar</button></form>
+</dialog>
+
+<!-- =================================================== MODAL: alterar duração -->
+<dialog id="durModal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Alterar duração</h3>
+    <p class="text-sm opacity-70 mt-1">Recria o ban com nova duração (delete + add via cscli).</p>
+    <div class="space-y-3 mt-3">
+      <label class="form-control">
+        <span class="label-text text-xs">IP / valor</span>
+        <input id="durValue" type="text" class="input input-bordered input-sm mono" readonly />
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs">Nova duração</span>
+        <div class="flex gap-2">
+          <select id="durPreset" class="select select-sm select-bordered">
+            <option value="1h">1 hora</option>
+            <option value="4h">4 horas</option>
+            <option value="24h" selected>24 horas</option>
+            <option value="168h">7 dias</option>
+            <option value="720h">30 dias</option>
+            <option value="87600h">Permanente</option>
+            <option value="__free">Personalizado…</option>
+          </select>
+          <input id="durFree" type="text" placeholder="ex.: 1h30m" class="input input-sm input-bordered mono flex-1 hidden" />
+        </div>
+      </label>
+      <label class="form-control">
+        <span class="label-text text-xs">Motivo</span>
+        <input id="durReason" type="text" placeholder="painel: ajuste manual de duração" class="input input-sm input-bordered" />
+      </label>
+    </div>
+    <div class="modal-action">
+      <button id="durConfirm" class="btn btn-sm btn-primary">Aplicar</button>
+      <form method="dialog"><button class="btn btn-sm">Cancelar</button></form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>fechar</button></form>
+</dialog>
+
+<!-- ============================================= TELA DE LOGIN (cheia, dedicada) -->
+<div id="loginScreen" class="hidden fixed inset-0 z-[90] bg-base-200 flex items-center justify-center p-4 overflow-hidden">
+  <!-- Blobs decorativos com o primário do tema (atrás do card). -->
+  <div class="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[36rem] h-[36rem] rounded-full bg-primary/15 blur-3xl"></div>
+  <div class="pointer-events-none absolute -bottom-32 -right-24 w-[30rem] h-[30rem] rounded-full bg-secondary/10 blur-3xl"></div>
+  <div class="relative w-full max-w-sm">
+    <!-- Marca acima do card -->
+    <div class="text-center mb-6">
+      <div class="mx-auto mb-3 w-20 h-20 flex items-center justify-center">
+        <img src="/static/logo-light.png" alt="Mini SOC" class="logo-img logo-light w-20 h-20" />
+        <img src="/static/logo-dark.png"  alt="Mini SOC" class="logo-img logo-dark  w-20 h-20" />
+      </div>
+      <h1 class="font-bold text-2xl tracking-tight">Mini SOC</h1>
+      <p class="text-sm opacity-60 mt-1">Security Operations Dashboard</p>
+    </div>
+    <!-- Card do formulário -->
+    <div class="card bg-base-100 shadow-2xl border border-base-300">
+      <form id="loginForm" class="card-body gap-4 p-6 sm:p-8">
+        <p class="text-sm opacity-70 text-center -mt-1">Entre para continuar</p>
+        <label class="form-control">
+          <span class="label-text text-xs mb-1">Usuário</span>
+          <input id="loginUser" type="text" autocomplete="username" placeholder="admin" class="input input-bordered" required />
+        </label>
+        <label class="form-control">
+          <span class="label-text text-xs mb-1">Senha</span>
+          <input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••" class="input input-bordered" required />
+        </label>
+        <div id="loginError" class="text-error text-sm hidden"></div>
+        <button type="submit" id="loginBtn" class="btn btn-primary w-full mt-1">Entrar</button>
+      </form>
+    </div>
+    <p class="text-center text-xs opacity-40 mt-5">CrowdSec &amp; Nginx · acesso restrito</p>
+  </div>
+</div>
+
+<!-- Pilha de toasts -->
+<!-- ================================================= MODAL: ajuda / documentação -->
+<!-- Tela de AJUDA em tela cheia (overlay full-screen, não modal). -->
+<div id="helpScreen" class="hidden fixed inset-0 z-[80] bg-base-100 overflow-y-auto">
+  <!-- Barra superior fixa da tela de ajuda -->
+  <div class="sticky top-0 z-10 bg-base-100/95 backdrop-blur border-b border-base-300">
+    <div class="max-w-[860px] mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
+      <button id="btnHelpBack" class="btn btn-sm btn-ghost gap-1.5" title="Voltar ao painel">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Voltar
+      </button>
+      <span class="text-sm font-semibold opacity-80">Ajuda &amp; documentação</span>
+    </div>
+  </div>
+  <!-- Conteúdo (renderizado a partir do Markdown por marked.js ao abrir) -->
+  <div class="max-w-[860px] mx-auto px-4 sm:px-6 py-8">
+    <div id="helpContent" class="prose-doc"></div>
+    <div class="mt-8 pt-4 border-t border-base-300">
+      <button id="btnHelpBack2" class="btn btn-sm btn-primary gap-1.5">← Voltar ao painel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fonte da documentação em Markdown (renderizada por marked.js). -->
+<script type="text/markdown" id="helpMarkdown">
+## Origens das decisões do CrowdSec
+
+**Origem** = *quem* decidiu banir o IP. Não confundir: **origem** = quem decidiu · **cenário** = qual regra casou (o motivo) · **tipo** = o que fazer (`ban`/`captcha`).
+
+| Origem | Bloqueios | Ativos | O que é |
+|---|---|---|---|
+| **CAPI** | 24.708 | 24.707 | Blocklist da comunidade CrowdSec (nuvem). IPs que já atacaram outros servidores — chegam pré-banidos, sem terem tocado no seu site. **≈99,6% do total.** |
+| **crowdsec** | 95 | 17 | O agente local no seu servidor detectando ataques reais nos logs do nginx (`direct-ip-access`, `http-bad-user-agent`, CVE-2021-41773...). **É o ataque contra VOCÊ.** |
+| **cscli** | 5 | 4 | Bans manuais — feitos por você no terminal ou pelo botão "Banir IP" do Mini SOC (`scan direto`, `visto no wazuh`, `banimento manual`). |
+
+### Como agir com alertas
+- **crowdsec → alertar sempre.** Ataque real contra você; sinal de alto valor, baixo volume.
+- **cscli → opcional.** Você mesmo criou; útil se há mais de um admin.
+- **CAPI → não alertar.** Milhares de bloqueios preventivos por dia = ruído puro.
+
+Por isso o padrão é `ALERT_ORIGINS=crowdsec,cscli`.
+
+### ⚠ País e ASN aparecem vazios?
+País/ASN vivem na tabela `alerts` (join por `alert_decisions`). Hoje **nenhuma** decisão tem alerta linkado — nem as `crowdsec`, que deveriam. Provável retenção curta de `alerts` no CrowdSec. Investigar a config de retenção se quiser geolocalização na aba Decisões.
+
+### Glossário rápido
+- **Ban ativo:** decisão com `until` no futuro — IP bloqueado agora.
+- **CF (badge nos logs):** IP da borda da Cloudflare, não do visitante real (o real depende do `real_ip` do nginx, já configurado — logs antigos ainda mostram o da CF).
+- **Alterar duração:** o CrowdSec não tem *update* — o painel faz `delete` + `add` via `cscli`.
+- **Unban pode ser temporário:** se o IP voltar a casar um cenário, o CrowdSec rebane no próximo hit.
+</script>
+
+<div id="toastStack" class="toast toast-end toast-stack"></div>
+
+<!-- ============================================================ CDNs (zero-build) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/daisyui@4/dist/full.min.css" rel="stylesheet" />
+
+<!-- Paleta da marca: o laranja do logo (#F06018) vira a cor PRIMARY em AMBOS os
+     temas, sobrescrevendo os tokens do DaisyUI. Precisa vir DEPOIS do CSS do
+     DaisyUI para vencer a cascata. Secondary = âmbar do logo (#F8A810). -->
+<style>
+  :root, [data-theme="cupcake"], [data-theme="dark"] {
+    --p:  66.5835% 0.1924 41.8699;   /* primary  = #F06018 (laranja do logo)   */
+    --pf: 59.4797% 0.1754 41.8525;   /* primary-focus (hover, ~10% mais escuro) */
+    --pc: 100% 0 0;                  /* primary-content = branco (texto no botão)*/
+    --s:  79.0148% 0.1648 74.2199;   /* secondary = #F8A810 (âmbar das lhamas)  */
+    --sf: 71.0000% 0.1560 74.0000;   /* secondary-focus                          */
+    --sc: 22% 0.02 60;               /* secondary-content = marrom escuro        */
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+<script>
+"use strict";
+/* ==========================================================================
+   Mini SOC — lógica da SPA (vanilla JS).
+   Tudo em memória; nenhum uso de localStorage/sessionStorage.
+   ========================================================================== */
+
+/* Temas: claro ("cupcake") e escuro ("dark"). Sem localStorage (regra do
+   projeto) — a escolha vive em memória; recarregar volta ao padrão claro. */
+const THEME_LIGHT = "cupcake";
+const THEME_DARK = "dark";
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  state.theme = theme;
+  const dark = theme === THEME_DARK;
+  const sun = document.getElementById("iconSun");
+  const moon = document.getElementById("iconMoon");
+  if (sun && moon) { sun.classList.toggle("hidden", dark); moon.classList.toggle("hidden", !dark); }
+  // Recalibra a paleta de gráficos e redesenha (cores dependem do tema).
+  applyVizPalette(theme);
+  if (typeof redrawAllCharts === "function") redrawAllCharts();
+}
+function toggleTheme() {
+  applyTheme(state.theme === THEME_DARK ? THEME_LIGHT : THEME_DARK);
+}
+// Aplica o tema claro assim que o script carrega (antes do <body> pintar).
+document.documentElement.setAttribute("data-theme", THEME_LIGHT);
+
+/* ---------------------------------------------------------------- Estado global */
+const state = {
+  theme: THEME_LIGHT,
+  mainTab: "crowdsec",
+  subTab: "painel",
+  logTab: "listagem",
+  origins: [],
+  health: null,
+  charts: {},                 // instâncias Chart.js por id de canvas
+  decisions: { page: 1, pageSize: 50, total: 0 },
+  audit: { page: 1, pageSize: 50, total: 0 },
+  logs: { page: 1, pageSize: 100, total: 0, file: "" },
+  live: { es: null, on: false },
+  banContext: null,           // callback pós-ban (para refresh contextual)
+  loginResolvers: [],         // filas de espera enquanto o login está aberto
+  loginOpen: false,
+};
+
+// Cores das séries (paleta de gráficos). As séries s1–s8 servem em claro e
+// escuro; apenas os tokens neutros (grade/eixo/tinta/superfície) mudam por tema.
+const CSS = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const VIZ = {
+  s: () => ["--viz-s1","--viz-s2","--viz-s3","--viz-s4","--viz-s5","--viz-s6","--viz-s7","--viz-s8"].map(CSS),
+  surface: () => CSS("--viz-surface"),
+  grid: () => CSS("--viz-grid"),
+  axis: () => CSS("--viz-axis"),
+  muted: () => CSS("--viz-muted"),
+  ink2: () => CSS("--viz-ink-2"),
+  good: () => CSS("--st-good"),
+  warning: () => CSS("--st-warning"),
+  critical: () => CSS("--st-critical"),
+};
+
+// Ajusta os tokens neutros da paleta conforme o tema, sobrescrevendo o :root.
+function applyVizPalette(theme) {
+  const r = document.documentElement.style;
+  if (theme === THEME_DARK) {
+    r.setProperty("--viz-surface", "#1a1a19");
+    r.setProperty("--viz-grid",    "#2c2c2a");
+    r.setProperty("--viz-axis",    "#383835");
+    r.setProperty("--viz-muted",   "#8b8981");
+    r.setProperty("--viz-ink-2",   "#c9c7bc");
+  } else { // claro (cupcake)
+    r.setProperty("--viz-surface", "#efeae6");
+    r.setProperty("--viz-grid",    "#e0d8d1");
+    r.setProperty("--viz-axis",    "#cabfb6");
+    r.setProperty("--viz-muted",   "#8b7f76");
+    r.setProperty("--viz-ink-2",   "#4a4038");
+  }
+  if (typeof Chart !== "undefined") Chart.defaults.color = VIZ.ink2();
+}
+
+// Redesenha os gráficos atualmente montados com os dados já carregados em cache.
+function redrawAllCharts() {
+  if (state._tsData) renderTimeseries(state._tsData);
+  if (state._logStats) {
+    renderLogOverTime(state._logStats.over_time || []);
+    renderLogStatus(state._logStats.status_dist || []);
+  }
+}
+
+/* ---------------------------------------------------------------- Utilidades */
+function $(sel, root = document) { return root.querySelector(sel); }
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined) continue;
+    if (k === "class") node.className = v;
+    else if (k === "html") node.innerHTML = v;
+    else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c === null || c === undefined || c === false) continue;
+    node.append(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  return node;
+}
+
+// Escapa texto para inserção segura em HTML (defesa básica de XSS ao montar linhas).
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+// Converte código de país (ISO-3166 alfa-2) em emoji de bandeira.
+function countryCodeToFlag(cc) {
+  if (!cc || typeof cc !== "string") return "🏳️";
+  const code = cc.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return "🏳️";
+  const base = 0x1f1e6;
+  return String.fromCodePoint(base + (code.charCodeAt(0) - 65), base + (code.charCodeAt(1) - 65));
+}
+
+// Formata bytes de forma compacta.
+function fmtBytes(n) {
+  if (n === null || n === undefined) return "—";
+  n = Number(n);
+  if (!isFinite(n)) return "—";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(1)) + " " + u[i];
+}
+
+// Formata número inteiro com separador de milhar (pt-BR).
+function fmtInt(n) {
+  const v = Number(n);
+  return isFinite(v) ? v.toLocaleString("pt-BR") : "—";
+}
+
+// Parseia timestamp UTC do CrowdSec (que pode vir sem sufixo Z) para Date local.
+function parseUtc(s) {
+  if (!s) return null;
+  let str = String(s).trim();
+  // Se não tem fuso explícito, assume UTC (o CrowdSec grava em UTC).
+  if (!/[zZ]|[+\-]\d{2}:?\d{2}$/.test(str)) {
+    str = str.replace(" ", "T") + "Z";
+  } else {
+    str = str.replace(" ", "T");
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Data/hora local legível.
+function fmtLocal(s) {
+  const d = parseUtc(s);
+  if (!d) return s ? esc(s) : "—";
+  return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
+}
+
+// Diferença amigável até uma data futura ("expira em"), com badges especiais.
+// Retorna { text, cls } — cls é a classe de badge DaisyUI.
+function untilBadge(untilStr) {
+  const d = parseUtc(untilStr);
+  if (!d) return { text: "—", cls: "badge-ghost", permanent: false };
+  const now = Date.now();
+  const ms = d.getTime() - now;
+  const years = ms / (1000 * 60 * 60 * 24 * 365);
+  if (years > 5) return { text: "permanente", cls: "badge-secondary", permanent: true };
+  if (ms <= 0) return { text: "expirado", cls: "badge-ghost", permanent: false };
+  const mins = ms / 60000;
+  let text;
+  if (mins < 60) text = Math.max(1, Math.round(mins)) + " min";
+  else if (mins < 60 * 24) text = Math.round(mins / 60) + " h";
+  else text = Math.round(mins / (60 * 24)) + " d";
+  // "Expira logo": menos de ~1h.
+  const cls = mins <= 60 ? "badge-warning" : "badge-ghost";
+  return { text, cls, permanent: false };
+}
+
+/* ---------------------------------------------------------------- Toast */
+let _toastSeq = 0;
+function toast(message, kind = "info", timeout = 4500) {
+  const cls = { success: "alert-success", error: "alert-error", warning: "alert-warning", info: "alert-info" }[kind] || "alert-info";
+  const id = "toast-" + (++_toastSeq);
+  const node = el("div", { class: `alert ${cls} shadow-lg text-sm max-w-md`, id });
+  node.append(el("span", { html: esc(message) }));
+  const close = el("button", { class: "btn btn-xs btn-ghost", onclick: () => node.remove() }, "✕");
+  node.append(close);
+  $("#toastStack").append(node);
+  if (timeout > 0) setTimeout(() => node.remove(), timeout);
+}
+
+/* ---------------------------------------------------------------- apiFetch
+   Wrapper central: injeta headers JSON, trata 401 (abre login e reenfileira),
+   parseia JSON e transforma erros em toast + exceção. */
+async function apiFetch(url, opts = {}) {
+  const options = Object.assign({ headers: {} }, opts);
+  options.headers = Object.assign({ "Accept": "application/json" }, options.headers);
+  if (options.body && !(options.body instanceof FormData) && typeof options.body !== "string") {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(options.body);
+  }
+
+  let resp;
+  try {
+    resp = await fetch(url, options);
+  } catch (netErr) {
+    toast("Falha de rede ao acessar " + esc(url), "error");
+    throw netErr;
+  }
+
+  if (resp.status === 401) {
+    // Abre o overlay de login e espera o usuário autenticar, depois repete.
+    await ensureLogin();
+    return apiFetch(url, opts);
+  }
+
+  const ct = resp.headers.get("content-type") || "";
+  let data = null;
+  if (ct.includes("application/json")) {
+    try { data = await resp.json(); } catch (_) { data = null; }
+  } else {
+    try { data = await resp.text(); } catch (_) { data = null; }
+  }
+
+  if (!resp.ok) {
+    const detail = (data && (data.detail || data.error)) || (typeof data === "string" ? data : "") || ("HTTP " + resp.status);
+    const err = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    err.status = resp.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+/* ---------------------------------------------------------------- Login overlay */
+function ensureLogin() {
+  // Retorna uma promise que resolve quando o login for concluído com sucesso.
+  return new Promise((resolve) => {
+    state.loginResolvers.push(resolve);
+    if (!state.loginOpen) openLogin();
+  });
+}
+
+function openLogin() {
+  state.loginOpen = true;
+  $("#loginError").classList.add("hidden");
+  // Fecha a tela de ajuda se estiver aberta (não faz sentido sobrepor ao login).
+  closeHelp();
+  $("#loginScreen").classList.remove("hidden");
+  setTimeout(() => $("#loginUser").focus(), 50);
+}
+
+async function submitLogin(ev) {
+  ev.preventDefault();
+  const btn = $("#loginBtn");
+  const errBox = $("#loginError");
+  errBox.classList.add("hidden");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  const body = new URLSearchParams();
+  body.set("username", $("#loginUser").value);
+  body.set("password", $("#loginPass").value);
+  try {
+    const resp = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+      body: body.toString(),
+    });
+    if (!resp.ok) {
+      let msg = "Credenciais inválidas.";
+      try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      errBox.textContent = msg;
+      errBox.classList.remove("hidden");
+      return;
+    }
+    // Sucesso: esconde a tela de login, libera chamadas em espera e recarrega.
+    $("#loginScreen").classList.add("hidden");
+    state.loginOpen = false;
+    $("#loginPass").value = "";
+    const resolvers = state.loginResolvers.splice(0);
+    resolvers.forEach((r) => r());
+    if (resolvers.length === 0) {
+      // Login proativo (ninguém esperando) — recarrega a aba atual.
+      bootAfterAuth();
+    }
+    toast("Autenticado com sucesso.", "success");
+  } catch (e) {
+    errBox.textContent = "Erro ao autenticar: " + e.message;
+    errBox.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("loading");
+  }
+}
+
+async function logout() {
+  try { await fetch("/logout", { method: "POST", headers: { "Accept": "application/json" } }); } catch (_) {}
+  toast("Sessão encerrada.", "info");
+  // Reabre o login (a página continua sendo servida; a API passará a dar 401).
+  openLogin();
+}
+
+/* ---------------------------------------------------------------- Ajuda / doc */
+let _helpRendered = false;
+function openHelp() {
+  const box = $("#helpContent");
+  if (box && !_helpRendered) {
+    const md = document.getElementById("helpMarkdown").textContent || "";
+    if (typeof marked !== "undefined") {
+      box.innerHTML = marked.parse(md);
+    } else {
+      // Fallback: marked não carregou (CDN offline) — mostra o texto cru legível.
+      box.innerHTML = "<pre style='white-space:pre-wrap'>" + esc(md) + "</pre>";
+    }
+    _helpRendered = true;
+  }
+  const scr = $("#helpScreen");
+  if (scr) { scr.classList.remove("hidden"); scr.scrollTop = 0; }
+}
+function closeHelp() {
+  const scr = $("#helpScreen");
+  if (scr) scr.classList.add("hidden");
+}
+
+/* ---------------------------------------------------------------- Gráficos */
+// Destrói uma instância anterior antes de recriar (evita erro de canvas reutilizado).
+function destroyChart(id) {
+  if (state.charts[id]) { try { state.charts[id].destroy(); } catch (_) {} delete state.charts[id]; }
+}
+
+function baseScales(opts = {}) {
+  return {
+    x: {
+      grid: { color: VIZ.grid(), drawBorder: false },
+      ticks: { color: VIZ.muted(), maxRotation: 0, autoSkip: true, ...(opts.xTicks || {}) },
+    },
+    y: {
+      beginAtZero: true,
+      grid: { color: VIZ.grid(), drawBorder: false },
+      ticks: { color: VIZ.muted(), precision: 0 },
+    },
+  };
+}
+
+/* ---------------------------------------------------------------- Navegação de abas */
+function setMainTab(tab) {
+  state.mainTab = tab;
+  document.querySelectorAll("[data-main-tab]").forEach((a) =>
+    a.classList.toggle("tab-active", a.dataset.mainTab === tab));
+  document.querySelectorAll("[data-panel]").forEach((p) =>
+    p.classList.toggle("hidden", p.dataset.panel !== tab));
+  if (tab === "crowdsec") { /* já carregado conforme sub-aba */ }
+  if (tab === "logs") { ensureLogsLoaded(); }
+}
+
+function setSubTab(tab) {
+  state.subTab = tab;
+  document.querySelectorAll("[data-sub-tab]").forEach((a) =>
+    a.classList.toggle("tab-active", a.dataset.subTab === tab));
+  document.querySelectorAll("[data-sub-panel]").forEach((p) =>
+    p.classList.toggle("hidden", p.dataset.subPanel !== tab));
+  if (tab === "painel") loadPainel();
+  else if (tab === "decisoes") loadDecisions();
+  else if (tab === "alertas") { loadAlertConfig(); loadAlertHistory(); }
+  else if (tab === "auditoria") loadAudit();
+}
+
+/* Sub-abas da aba Logs (namespace próprio para não colidir com data-sub-tab). */
+function setLogTab(tab) {
+  state.logTab = tab;
+  document.querySelectorAll("[data-log-tab]").forEach((a) =>
+    a.classList.toggle("tab-active", a.dataset.logTab === tab));
+  document.querySelectorAll("[data-log-panel]").forEach((p) =>
+    p.classList.toggle("hidden", p.dataset.logPanel !== tab));
+  // Estatísticas carregam sob demanda (só ao abrir a aba), sobre o arquivo atual.
+  if (tab === "estatisticas") loadLogStats();
+}
+
+/* ================================================================ SAÚDE */
+async function loadHealth() {
+  // Só a bolinha indica o estado (verde/vermelho/âmbar); o texto foi removido.
+  // O detalhe fica no tooltip (title) ao passar o mouse.
+  const dot = $("#healthDot");
+  const base = "health-dot ml-1 sm:ml-3 shrink-0";
+  try {
+    const h = await apiFetch("/api/health");
+    state.health = h;
+    const cs = h.crowdsec || {};
+    if (h.ok) {
+      dot.className = base + " ok";
+      dot.title = `CrowdSec OK (${cs.backend || "?"}, ${fmtInt(cs.decisions ?? 0)} decisões)`;
+    } else {
+      dot.className = base + " bad";
+      dot.title = "CrowdSec indisponível: " + (cs.error || "erro desconhecido");
+    }
+    if (!h.cscli_available) {
+      dot.className = base + " warn";
+      dot.title += " · cscli não encontrado (ações de escrita indisponíveis)";
+    }
+  } catch (e) {
+    dot.className = base + " bad";
+    dot.title = "Falha ao consultar saúde: " + e.message;
+  }
+}
+
+/* ================================================================ ORIGENS */
+async function loadOrigins() {
+  try {
+    const list = await apiFetch("/api/origins");
+    state.origins = Array.isArray(list) ? list : [];
+  } catch (e) {
+    state.origins = [];
+  }
+  // Popula os selects de origem (série temporal + filtro de decisões).
+  for (const selId of ["#tsOrigin", "#decOrigin"]) {
+    const sel = $(selId);
+    if (!sel) continue;
+    const current = sel.value;
+    const first = sel.querySelector("option");
+    sel.innerHTML = "";
+    sel.append(first ? first.cloneNode(true) : el("option", { value: "" }, "Todas"));
+    for (const o of state.origins) sel.append(el("option", { value: o }, o));
+    if (current) sel.value = current;
+  }
+}
+
+/* ================================================================ PAINEL CROWDSEC */
+async function loadPainel() {
+  await Promise.allSettled([loadStats(), loadTimeseries(), loadTops()]);
+}
+
+async function loadStats() {
+  try {
+    const s = await apiFetch("/api/stats");
+    $("#statActiveBans").textContent = fmtInt(s.active_bans);
+    $("#statActiveIps").textContent = fmtInt(s.active_unique_ips);
+    $("#statNewToday").textContent = fmtInt(s.new_today);
+    $("#statLast24h").textContent = fmtInt(s.last_24h);
+    $("#statTotalDecisions").textContent = fmtInt(s.total_decisions);
+    $("#statTotalAlerts").textContent = fmtInt(s.total_alerts);
+  } catch (e) {
+    toast("Erro ao carregar estatísticas: " + e.message, "error");
+  }
+}
+
+async function loadTimeseries() {
+  const days = $("#tsDays").value || "30";
+  const origin = $("#tsOrigin").value || "";
+  let data;
+  try {
+    const qs = new URLSearchParams({ days });
+    if (origin) qs.set("origin", origin);
+    data = await apiFetch("/api/timeseries?" + qs.toString());
+  } catch (e) {
+    toast("Erro ao carregar série temporal: " + e.message, "error");
+    return;
+  }
+  state._tsData = Array.isArray(data) ? data : [];
+  renderTimeseries(state._tsData);
+}
+
+function renderTimeseries(arr) {
+  arr = Array.isArray(arr) ? arr : [];
+  const labels = arr.map((d) => {
+    const dt = new Date(d.day + "T00:00:00");
+    return isNaN(dt) ? d.day : dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  });
+  const values = arr.map((d) => d.count || 0);
+  destroyChart("chartTimeseries");
+  const cv = $("#chartTimeseries");
+  if (!cv) return;
+  const ctx = cv.getContext("2d");
+  state.charts.chartTimeseries = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Bloqueios",
+        data: values,
+        borderColor: VIZ.s()[0],
+        backgroundColor: "rgba(57,135,229,0.12)",
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        tension: 0.25,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: {} } },
+      scales: baseScales(),
+    },
+  });
+}
+
+async function loadTops() {
+  const defs = [
+    { kind: "countries", body: "#topCountries", flag: true },
+    { kind: "scenarios", body: "#topScenarios", flag: false },
+    { kind: "asn", body: "#topAsn", flag: false, asn: true },
+  ];
+  await Promise.allSettled(defs.map((d) => loadTop(d)));
+}
+
+async function loadTop(def) {
+  const body = $(def.body);
+  try {
+    const rows = await apiFetch(`/api/top/${def.kind}?limit=10&active_only=true`);
+    body.innerHTML = "";
+    if (!rows || rows.length === 0) {
+      body.append(el("tr", {}, el("td", { class: "opacity-60" }, "sem dados")));
+      return;
+    }
+    const max = Math.max(...rows.map((r) => r.count || 0), 1);
+    for (const r of rows) {
+      const label = r.label ?? "(desconhecido)";
+      let labelNode;
+      if (def.flag) {
+        labelNode = el("span", {}, countryCodeToFlag(label) + " ", el("span", { class: "opacity-80" }, label));
+      } else if (def.asn) {
+        const asn = r.asn ? " (AS" + r.asn + ")" : "";
+        labelNode = el("span", { class: "mono text-xs" }, (label || "?") + asn);
+      } else {
+        labelNode = el("span", { class: "text-xs" }, label);
+      }
+      const bar = el("div", { class: "h-1.5 rounded-full mt-1", style: `width:${Math.round((r.count / max) * 100)}%;background:${VIZ.s()[0]}` });
+      body.append(el("tr", {},
+        el("td", {}, labelNode, bar),
+        el("td", { class: "text-right tnum w-16" }, fmtInt(r.count)),
+      ));
+    }
+  } catch (e) {
+    body.innerHTML = "";
+    body.append(el("tr", {}, el("td", { class: "text-error text-xs" }, "erro: " + e.message)));
+  }
+}
+
+/* ================================================================ DECISÕES */
+async function loadDecisions() {
+  const body = $("#decBody");
+  const qs = new URLSearchParams();
+  const search = $("#decSearch").value.trim();
+  const type = $("#decType").value;
+  const origin = $("#decOrigin").value;
+  const activeOnly = $("#decActiveOnly").checked;
+  if (search) qs.set("search", search);
+  if (type) qs.set("type", type);
+  if (origin) qs.set("origin", origin);
+  qs.set("active_only", activeOnly ? "true" : "false");
+  qs.set("page", String(state.decisions.page));
+  qs.set("page_size", String(state.decisions.pageSize));
+
+  body.parentElement.parentElement.classList.add("is-loading");
+  try {
+    const res = await apiFetch("/api/decisions?" + qs.toString());
+    state.decisions.total = res.total || 0;
+    renderDecisions(res.items || []);
+    updatePager("dec", state.decisions);
+  } catch (e) {
+    body.innerHTML = "";
+    body.append(el("tr", {}, el("td", { colspan: "10", class: "text-center text-error py-6" }, "Erro: " + e.message)));
+  } finally {
+    body.parentElement.parentElement.classList.remove("is-loading");
+  }
+}
+
+function renderDecisions(items) {
+  const body = $("#decBody");
+  body.innerHTML = "";
+  if (!items.length) {
+    body.append(el("tr", {}, el("td", { colspan: "10", class: "text-center opacity-60 py-6" }, "Nenhuma decisão encontrada.")));
+    return;
+  }
+  for (const it of items) {
+    const ub = untilBadge(it.until);
+    const asn = it.as_number ? ("AS" + it.as_number) : (it.as_name || "—");
+    const flag = it.country ? countryCodeToFlag(it.country) + " " + esc(it.country) : "—";
+
+    // Menu de ações por linha (dropdown DaisyUI).
+    const menu = el("div", { class: "dropdown dropdown-end dropdown-top" });
+    const trigger = el("label", { tabindex: "0", class: "btn btn-xs btn-ghost" }, "⋯");
+    const ul = el("ul", { tabindex: "0", class: "dropdown-content menu bg-base-100 rounded-box shadow z-[80] w-52 p-2" });
+    ul.append(el("li", {}, el("a", { onclick: () => openDurationModal(it.value) }, "Alterar duração")));
+    ul.append(el("li", {}, el("a", { onclick: () => makePermanent(it.value) }, "Tornar permanente")));
+    ul.append(el("li", {}, el("a", { class: "text-error", onclick: () => unbanIp(it.value) }, "Remover (unban)")));
+    menu.append(trigger, ul);
+
+    const badges = el("span", { class: "flex items-center gap-1" });
+    badges.append(el("span", { class: `badge ${ub.cls} badge-sm` }, ub.text));
+
+    body.append(el("tr", {},
+      el("td", { class: "mono text-xs whitespace-nowrap" }, it.value ?? "—"),
+      el("td", { class: "whitespace-nowrap" }, flag),
+      el("td", { class: "mono text-xs whitespace-nowrap", title: it.as_name || "" }, asn),
+      el("td", { class: "text-xs" }, it.scenario ?? "—"),
+      el("td", {}, el("span", { class: "badge badge-sm " + (it.type === "ban" ? "badge-error" : "badge-warning") }, it.type ?? "—")),
+      el("td", { class: "text-xs" }, it.origin ?? "—"),
+      el("td", { class: "text-xs whitespace-nowrap" }, fmtLocal(it.created_at)),
+      el("td", { class: "whitespace-nowrap" }, badges),
+      el("td", { class: "text-xs opacity-70" }, it.alert_id ?? "—"),
+      el("td", {}, menu),
+    ));
+  }
+}
+
+async function makePermanent(value) {
+  await patchDuration(value, "87600h", "painel: tornar permanente");
+}
+
+async function unbanIp(value) {
+  if (!confirm(
+    `Remover (unban) todas as decisões de ${value}?\n\n` +
+    "Observação: o unban pode ser temporário se o IP continuar atacando — o " +
+    "CrowdSec pode re-banir. O caminho permanente é a allowlist (TODO)."
+  )) return;
+  try {
+    const res = await apiFetch("/api/decisions/by-ip?value=" + encodeURIComponent(value), { method: "DELETE" });
+    handleWriteResult(res, "Unban de " + value);
+  } catch (e) {
+    reportWriteError(e, "unban de " + value);
+  }
+  await refreshAfterWrite();
+}
+
+async function patchDuration(value, duration, reason) {
+  try {
+    const res = await apiFetch("/api/decisions/duration", {
+      method: "PATCH",
+      body: { value, duration, reason },
+    });
+    handleWriteResult(res, "Duração de " + value + " → " + duration);
+  } catch (e) {
+    reportWriteError(e, "alterar duração de " + value);
+  }
+  await refreshAfterWrite();
+}
+
+/* ================================================================ AUDITORIA */
+async function loadAudit() {
+  const body = $("#audBody");
+  const qs = new URLSearchParams({ page: String(state.audit.page), page_size: String(state.audit.pageSize) });
+  try {
+    const res = await apiFetch("/api/audit?" + qs.toString());
+    state.audit.total = res.total || 0;
+    renderAudit(res.items || []);
+    updatePager("aud", state.audit);
+  } catch (e) {
+    body.innerHTML = "";
+    body.append(el("tr", {}, el("td", { colspan: "8", class: "text-center text-error py-6" }, "Erro: " + e.message)));
+  }
+}
+
+function renderAudit(items) {
+  const body = $("#audBody");
+  body.innerHTML = "";
+  if (!items.length) {
+    body.append(el("tr", {}, el("td", { colspan: "8", class: "text-center opacity-60 py-6" }, "Sem registros de auditoria.")));
+    return;
+  }
+  for (const it of items) {
+    const okBadge = el("span", { class: "badge badge-sm " + (it.success ? "badge-success" : "badge-error") }, it.success ? "sim" : "não");
+    const detailStr = it.detail ? (typeof it.detail === "object" ? JSON.stringify(it.detail) : String(it.detail)) : "—";
+
+    const hasIO = (it.stdout && it.stdout.trim()) || (it.stderr && it.stderr.trim()) || it.command;
+    const toggle = el("button", { class: "btn btn-xs btn-ghost", title: "detalhes" }, hasIO ? "▸" : "");
+    const mainRow = el("tr", {},
+      el("td", {}, toggle),
+      el("td", { class: "text-xs whitespace-nowrap" }, fmtLocal(it.ts)),
+      el("td", { class: "text-xs" }, it.actor ?? "—"),
+      el("td", {}, el("span", { class: "badge badge-sm badge-outline" }, it.action ?? "—")),
+      el("td", { class: "mono text-xs" }, it.target ?? "—"),
+      el("td", { class: "text-xs truncate-cell", title: detailStr }, detailStr),
+      el("td", { class: "text-xs tnum" }, it.exit_code ?? "—"),
+      el("td", {}, okBadge),
+    );
+    body.append(mainRow);
+
+    if (hasIO) {
+      const pre = [];
+      if (it.command) pre.push("$ " + it.command);
+      if (it.stdout && it.stdout.trim()) pre.push("[stdout]\n" + it.stdout.trim());
+      if (it.stderr && it.stderr.trim()) pre.push("[stderr]\n" + it.stderr.trim());
+      const detailRow = el("tr", { class: "hidden expand-cell" },
+        el("td", {}),
+        el("td", { colspan: "7" }, el("pre", { class: "bg-base-300 rounded p-2" }, pre.join("\n\n"))),
+      );
+      body.append(detailRow);
+      toggle.addEventListener("click", () => {
+        const hidden = detailRow.classList.toggle("hidden");
+        toggle.textContent = hidden ? "▸" : "▾";
+      });
+    }
+  }
+}
+
+/* ================================================================ ALERTAS */
+async function loadAlertConfig() {
+  try {
+    const cfg = await apiFetch("/api/alerts/config");
+    $("#alEnabled").checked = !!cfg.enabled;
+    $("#alOrigins").value = (cfg.origins || []).join(", ");
+    $("#alScenarios").value = (cfg.scenarios || []).join(", ");
+    $("#alThreshCount").value = cfg.threshold_count ?? 0;
+    $("#alThreshMin").value = cfg.threshold_minutes ?? 5;
+    const ch = cfg.channels || {};
+    $("#alChWebhook").checked = !!ch.webhook;
+    $("#alChTelegram").checked = !!ch.telegram;
+    $("#alChEmail").checked = !!ch.email;
+  } catch (e) {
+    toast("Erro ao carregar config de alertas: " + e.message, "error");
+  }
+}
+
+async function saveAlertConfig() {
+  const csv = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+  const cfg = {
+    enabled: $("#alEnabled").checked,
+    origins: csv($("#alOrigins").value),
+    scenarios: csv($("#alScenarios").value),
+    threshold_count: parseInt($("#alThreshCount").value, 10) || 0,
+    threshold_minutes: parseInt($("#alThreshMin").value, 10) || 5,
+    channels: {
+      webhook: $("#alChWebhook").checked,
+      telegram: $("#alChTelegram").checked,
+      email: $("#alChEmail").checked,
+    },
+  };
+  try {
+    await apiFetch("/api/alerts/config", { method: "PUT", body: cfg });
+    toast("Configuração de alertas salva.", "success");
+  } catch (e) {
+    toast("Erro ao salvar: " + e.message, "error");
+  }
+}
+
+async function testAlert() {
+  const out = $("#alTestResult");
+  out.textContent = "enviando…";
+  const btn = $("#alTest");
+  btn.classList.add("loading"); btn.disabled = true;
+  try {
+    const res = await apiFetch("/api/alerts/test", { method: "POST" });
+    // res é um dict por canal: {webhook:{ok,...}, telegram:{ok,...}, email:{ok,...}}
+    const parts = [];
+    for (const [ch, r] of Object.entries(res || {})) {
+      const ok = r && (r.ok === true || r.sent === true);
+      const detail = r && (r.error || r.detail || r.status);
+      parts.push(`${ch}: ${ok ? "✅" : "❌"}${detail ? " (" + esc(String(detail)) + ")" : ""}`);
+    }
+    out.innerHTML = parts.length ? parts.join(" · ") : "sem canais configurados";
+    const anyOk = Object.values(res || {}).some((r) => r && (r.ok === true || r.sent === true));
+    toast(anyOk ? "Teste enviado." : "Teste concluído (ver resultado por canal).", anyOk ? "success" : "warning");
+  } catch (e) {
+    out.textContent = "erro: " + e.message;
+    toast("Erro ao enviar teste: " + e.message, "error");
+  } finally {
+    btn.classList.remove("loading"); btn.disabled = false;
+  }
+}
+
+async function loadAlertHistory() {
+  const body = $("#alHistBody");
+  try {
+    const res = await apiFetch("/api/alerts/history?page=1&page_size=100");
+    const items = res.items || [];
+    body.innerHTML = "";
+    if (!items.length) {
+      body.append(el("tr", {}, el("td", { colspan: "8", class: "text-center opacity-60 py-6" }, "Sem alertas registrados.")));
+      return;
+    }
+    for (const it of items) {
+      const ch = it.channels || {};
+      const chStr = Object.entries(ch).filter(([, v]) => v).map(([k]) => k).join(", ") || "—";
+      const flag = it.country ? countryCodeToFlag(it.country) + " " + esc(it.country) : "—";
+      body.append(el("tr", {},
+        el("td", { class: "text-xs whitespace-nowrap" }, fmtLocal(it.ts)),
+        el("td", { class: "mono text-xs" }, it.ip ?? "—"),
+        el("td", { class: "whitespace-nowrap" }, flag),
+        el("td", { class: "mono text-xs" }, it.asn ?? "—"),
+        el("td", { class: "text-xs" }, it.scenario ?? "—"),
+        el("td", { class: "text-xs" }, it.origin ?? "—"),
+        el("td", { class: "text-xs" }, it.duration ?? "—"),
+        el("td", { class: "text-xs" }, chStr),
+      ));
+    }
+  } catch (e) {
+    body.innerHTML = "";
+    body.append(el("tr", {}, el("td", { colspan: "8", class: "text-center text-error py-6" }, "Erro: " + e.message)));
+  }
+}
+
+/* ================================================================ MODAL BANIR */
+// Resolve a duração escolhida em um modal (preset ou texto livre).
+function resolveDuration(presetSel, freeInput) {
+  const p = presetSel.value;
+  if (p === "__free") return (freeInput.value || "").trim();
+  return p;
+}
+
+function wirePresetToggle(presetSel, freeInput) {
+  presetSel.addEventListener("change", () => {
+    freeInput.classList.toggle("hidden", presetSel.value !== "__free");
+    if (presetSel.value === "__free") freeInput.focus();
+  });
+}
+
+// Abre o modal de banir; `prefillIp` preenche o IP; `onDone` é chamado após sucesso.
+function openBanModal(prefillIp = "", onDone = null) {
+  $("#banValue").value = prefillIp || "";
+  $("#banDurPreset").value = "4h";
+  $("#banDurFree").value = "";
+  $("#banDurFree").classList.add("hidden");
+  $("#banType").value = "ban";
+  $("#banReason").value = "";
+  state.banContext = onDone;
+  $("#banModal").showModal();
+  setTimeout(() => (prefillIp ? $("#banDurPreset") : $("#banValue")).focus(), 50);
+}
+
+async function confirmBan() {
+  const value = $("#banValue").value.trim();
+  const duration = resolveDuration($("#banDurPreset"), $("#banDurFree"));
+  const type = $("#banType").value;
+  const reason = $("#banReason").value.trim() || "painel: banimento manual";
+  if (!value) { toast("Informe um IP ou CIDR.", "warning"); return; }
+  if (!duration) { toast("Informe a duração.", "warning"); return; }
+  const btn = $("#banConfirm");
+  btn.classList.add("loading"); btn.disabled = true;
+  try {
+    const res = await apiFetch("/api/decisions", { method: "POST", body: { value, duration, reason, type } });
+    handleWriteResult(res, "Ban de " + value + " por " + duration);
+    if (res && res.ok) {
+      $("#banModal").close();
+      if (typeof state.banContext === "function") state.banContext();
+    }
+  } catch (e) {
+    reportWriteError(e, "banir " + value);
+  } finally {
+    btn.classList.remove("loading"); btn.disabled = false;
+  }
+  await refreshAfterWrite();
+}
+
+function openDurationModal(value) {
+  $("#durValue").value = value;
+  $("#durPreset").value = "24h";
+  $("#durFree").value = "";
+  $("#durFree").classList.add("hidden");
+  $("#durReason").value = "";
+  $("#durModal").showModal();
+}
+
+async function confirmDuration() {
+  const value = $("#durValue").value.trim();
+  const duration = resolveDuration($("#durPreset"), $("#durFree"));
+  const reason = $("#durReason").value.trim() || "painel: ajuste manual de duração";
+  if (!duration) { toast("Informe a duração.", "warning"); return; }
+  const btn = $("#durConfirm");
+  btn.classList.add("loading"); btn.disabled = true;
+  try {
+    const res = await apiFetch("/api/decisions/duration", { method: "PATCH", body: { value, duration, reason } });
+    handleWriteResult(res, "Duração de " + value + " → " + duration);
+    if (res && res.ok) $("#durModal").close();
+  } catch (e) {
+    reportWriteError(e, "alterar duração de " + value);
+  } finally {
+    btn.classList.remove("loading"); btn.disabled = false;
+  }
+  await refreshAfterWrite();
+}
+
+// Trata a resposta padronizada de escrita {ok, exit_code, stdout, stderr}.
+function handleWriteResult(res, label) {
+  if (res && res.ok) {
+    toast(esc(label) + " — OK.", "success");
+  } else {
+    const stderr = (res && res.stderr && res.stderr.trim()) || "";
+    toast(esc(label) + " falhou" + (stderr ? ": " + esc(stderr) : "") + ".", "error", 9000);
+  }
+}
+
+// Erro de exceção (ex.: 400 com stderr no corpo, 422 de validação).
+function reportWriteError(e, label) {
+  let msg = e.message || "erro";
+  const d = e.data;
+  if (d && d.stderr && d.stderr.trim()) msg = d.stderr.trim();
+  toast("Falha ao " + esc(label) + ": " + esc(msg), "error", 9000);
+}
+
+// Após qualquer escrita, atualiza saúde/estatística e a visão atual.
+async function refreshAfterWrite() {
+  loadHealth();
+  if (state.mainTab === "crowdsec") {
+    if (state.subTab === "decisoes") loadDecisions();
+    else if (state.subTab === "painel") loadStats();
+  } else if (state.mainTab === "logs") {
+    loadLogs();
+  }
+}
+
+/* ================================================================ LOGS NGINX */
+let _logsInitialized = false;
+async function ensureLogsLoaded() {
+  if (!_logsInitialized) {
+    _logsInitialized = true;
+    await loadLogFiles();
+  }
+}
+
+async function loadLogFiles() {
+  const sel = $("#logFile");
+  try {
+    const files = await apiFetch("/api/logs/files");
+    sel.innerHTML = "";
+    if (!files || !files.length) {
+      sel.append(el("option", { value: "" }, "nenhum arquivo encontrado"));
+      $("#lgBody").innerHTML = "";
+      $("#lgBody").append(el("tr", {}, el("td", { colspan: "10", class: "text-center opacity-60 py-6" }, "Nenhum arquivo de log disponível.")));
+      return;
+    }
+    // Separa logs atuais (não rotacionados) dos rotacionados, para clareza.
+    const atuais = files.filter((f) => !f.rotated);
+    const rotac = files.filter((f) => f.rotated);
+    const optLabel = (f) => {
+      const site = f.site && f.site !== "" ? f.site : "genérico";
+      return `${site} — ${f.name} (${fmtBytes(f.size)})${f.gz ? " · gz" : ""}`;
+    };
+    const addGroup = (label, arr) => {
+      if (!arr.length) return;
+      const g = el("optgroup", { label });
+      for (const f of arr) g.append(el("option", { value: f.name }, optLabel(f)));
+      sel.append(g);
+    };
+    addGroup("Sites (atuais)", atuais);
+    addGroup("Rotacionados / históricos", rotac);
+    state.logs.file = sel.value;
+    loadLogs();
+    if (state.logTab === "estatisticas") loadLogStats();
+  } catch (e) {
+    sel.innerHTML = "";
+    sel.append(el("option", { value: "" }, "erro ao listar"));
+    toast("Erro ao listar arquivos de log: " + e.message, "error");
+  }
+}
+
+function logFilters() {
+  const qs = new URLSearchParams();
+  qs.set("file", state.logs.file || $("#logFile").value || "");
+  const map = { ip: "#lgIp", status: "#lgStatus", method: "#lgMethod", path: "#lgPath", ua: "#lgUa", q: "#lgQ" };
+  for (const [key, sel] of Object.entries(map)) {
+    const v = $(sel).value.trim();
+    if (v) qs.set(key, v);
+  }
+  qs.set("lines", $("#lgLines").value || "2000");
+  qs.set("page", String(state.logs.page));
+  qs.set("page_size", String(state.logs.pageSize));
+  return qs;
+}
+
+async function loadLogs() {
+  const body = $("#lgBody");
+  const file = state.logs.file || $("#logFile").value;
+  if (!file) {
+    body.innerHTML = "";
+    body.append(el("tr", {}, el("td", { colspan: "9", class: "text-center opacity-60 py-6" }, "Selecione um arquivo.")));
+    return;
+  }
+  body.parentElement.parentElement.classList.add("is-loading");
+  try {
+    const res = await apiFetch("/api/logs?" + logFilters().toString());
+    state.logs.total = res.total || 0;
+    renderLogs(res.items || []);
+    updatePager("lg", state.logs);
+  } catch (e) {
+    body.innerHTML = "";
+    body.append(el("tr", {}, el("td", { colspan: "9", class: "text-center text-error py-6" }, "Erro: " + e.message)));
+  } finally {
+    body.parentElement.parentElement.classList.remove("is-loading");
+  }
+}
+
+function statusBadgeClass(status) {
+  if (status === null || status === undefined) return "badge-ghost";
+  const c = Math.floor(status / 100);
+  if (c === 2) return "badge-success";
+  if (c === 3) return "badge-info";
+  if (c === 4) return "badge-warning";
+  if (c === 5) return "badge-error";
+  return "badge-ghost";
+}
+
+function renderLogs(items) {
+  const body = $("#lgBody");
+  body.innerHTML = "";
+  if (!items.length) {
+    body.append(el("tr", {}, el("td", { colspan: "10", class: "text-center opacity-60 py-6" }, "Nenhuma linha corresponde aos filtros.")));
+    return;
+  }
+  for (const it of items) {
+    if (!it.matched) {
+      // Linha não parseada — mostrada crua em monospace.
+      body.append(el("tr", { class: "opacity-70" },
+        el("td", { colspan: "10", class: "mono text-xs", style: "white-space:pre-wrap;word-break:break-all" },
+          "⚠ não parseada: " + esc(it.raw ?? "")),
+      ));
+      continue;
+    }
+    const banned = it.banned
+      ? el("span", { class: "badge badge-error badge-sm", title: "IP atualmente banido" }, "banido")
+      : "";
+    const banBtn = el("button", { class: "btn btn-xs btn-error btn-outline", onclick: () => openBanModal(it.ip, () => loadLogs()) }, "Banir");
+
+    // Célula do IP: se for da Cloudflare, adiciona badge "CF" com aviso de que
+    // o IP registrado é da borda da CF (o real depende do log_format do vhost).
+    const ipCell = el("td", { class: "mono text-xs whitespace-nowrap" }, it.ip ?? "—");
+    if (it.cf) {
+      ipCell.append(" ");
+      ipCell.append(el("span", {
+        class: "badge badge-warning badge-xs align-middle",
+        title: "IP da Cloudflare — o IP real do visitante depende do log_format do site (CF-Connecting-IP)",
+      }, "CF"));
+    }
+
+    // Célula de acesso / domínio: como o visitante chegou (domínio ou IP direto).
+    const via = it.access_via || it.site || "—";
+    const viaDirect = via === "IP direto";
+    const viaCell = el("td", { class: "text-xs whitespace-nowrap" },
+      el("span", {
+        class: "badge badge-sm " + (viaDirect ? "badge-error badge-outline" : "badge-ghost"),
+        title: it.site ? ("arquivo: " + it.site) : "",
+      }, via),
+    );
+
+    body.append(el("tr", {},
+      ipCell,
+      viaCell,
+      el("td", { class: "text-xs whitespace-nowrap" }, it.time ? fmtLocal(it.time) : (it.time_raw || "—")),
+      el("td", { class: "text-xs" }, it.method ?? "—"),
+      el("td", { class: "text-xs truncate-cell", title: it.path || "" }, it.path ?? "—"),
+      el("td", {}, el("span", { class: "badge badge-sm " + statusBadgeClass(it.status) }, it.status ?? "—")),
+      el("td", { class: "text-xs tnum whitespace-nowrap" }, it.size == null ? "—" : fmtBytes(it.size)),
+      el("td", { class: "text-xs truncate-ua opacity-80", title: it.ua || "" }, it.ua ?? "—"),
+      el("td", {}, banned),
+      el("td", {}, banBtn),
+    ));
+  }
+}
+
+/* ---- Estatísticas dos logs ---- */
+async function loadLogStats() {
+  const file = state.logs.file || $("#logFile").value;
+  const fileBadge = $("#lgStatsFile"), meta = $("#lgStatsMeta");
+  if (fileBadge) fileBadge.textContent = file || "—";
+  if (!file) { if (meta) meta.textContent = "selecione um arquivo na aba Listagem"; return; }
+  const lines = ($("#lgStatsLines") && $("#lgStatsLines").value) || "5000";
+  if (meta) meta.textContent = "calculando…";
+  let res;
+  try {
+    res = await apiFetch("/api/logs/stats?" + new URLSearchParams({ file, lines }).toString());
+  } catch (e) {
+    if (meta) meta.textContent = "erro";
+    toast("Erro ao carregar estatísticas de log: " + e.message, "error");
+    return;
+  }
+  if (meta) meta.textContent = `${fmtInt(res.total_parsed || 0)} de ${fmtInt(res.total_lines || 0)} linhas analisadas`;
+  state._logStats = res;
+  renderLogOverTime(res.over_time || []);
+  renderLogStatus(res.status_dist || []);
+  renderLogTopTable("#logTopIps", res.top_ips || [], "ip", true);
+  renderLogTopTable("#logTopPaths", res.top_paths || [], "path", false);
+  renderLogTopTable("#logTopUas", res.top_uas || [], "ua", false);
+}
+
+function renderLogOverTime(data) {
+  const labels = data.map((d) => {
+    const dt = new Date(d.bucket);
+    return isNaN(dt) ? d.bucket : dt.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit" }) + "h";
+  });
+  const values = data.map((d) => d.count || 0);
+  destroyChart("chartLogOverTime");
+  const cv = $("#chartLogOverTime");
+  if (!cv) return;
+  const ctx = cv.getContext("2d");
+  state.charts.chartLogOverTime = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Requisições/hora",
+        data: values,
+        backgroundColor: VIZ.s()[0],
+        borderRadius: 4,
+        maxBarThickness: 24,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, title: { display: true, text: "Requisições por hora", color: VIZ.ink2(), font: { size: 12 } } },
+      scales: baseScales(),
+    },
+  });
+}
+
+function renderLogStatus(data) {
+  const labels = data.map((d) => String(d.status));
+  const values = data.map((d) => d.count || 0);
+  // Cores por classe de status usando os tokens de status/paleta.
+  const colorFor = (code) => {
+    const c = Math.floor(Number(code) / 100);
+    if (c === 2) return VIZ.good();
+    if (c === 3) return VIZ.s()[0];
+    if (c === 4) return VIZ.warning();
+    if (c === 5) return VIZ.critical();
+    return VIZ.muted();
+  };
+  const colors = data.map((d) => colorFor(d.status));
+  destroyChart("chartLogStatus");
+  const cv = $("#chartLogStatus");
+  if (!cv) return;
+  const ctx = cv.getContext("2d");
+  state.charts.chartLogStatus = new Chart(ctx, {
+    type: "doughnut",
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: VIZ.surface(), borderWidth: 2 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "right", labels: { color: VIZ.ink2(), boxWidth: 12, font: { size: 11 } } },
+        title: { display: true, text: "Distribuição de status", color: VIZ.ink2(), font: { size: 12 } },
+      },
+    },
+  });
+}
+
+function renderLogTopTable(sel, rows, key, mono) {
+  const body = $(sel);
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.append(el("tr", {}, el("td", { class: "opacity-60 text-xs" }, "sem dados")));
+    return;
+  }
+  const max = Math.max(...rows.map((r) => r.count || 0), 1);
+  for (const r of rows) {
+    const label = r[key] ?? "—";
+    const cell = el("td", { class: (mono ? "mono " : "") + "text-xs truncate-cell", title: String(label) }, String(label));
+    const bar = el("div", { class: "h-1 rounded-full mt-1", style: `width:${Math.round((r.count / max) * 100)}%;background:${VIZ.s()[0]}` });
+    cell.append(bar);
+    body.append(el("tr", {}, cell, el("td", { class: "text-right tnum w-14 text-xs" }, fmtInt(r.count))));
+  }
+}
+
+/* ---- Tail ao vivo (SSE) ---- */
+function toggleLive(on) {
+  state.live.on = on;
+  $("#liveWrap").classList.toggle("hidden", !on);
+  if (on) startLive(); else stopLive();
+}
+
+function startLive() {
+  stopLive();
+  const file = state.logs.file || $("#logFile").value;
+  if (!file) { toast("Selecione um arquivo primeiro.", "warning"); $("#liveToggle").checked = false; toggleLive(false); return; }
+  const url = "/api/logs/stream?file=" + encodeURIComponent(file);
+  let es;
+  try {
+    es = new EventSource(url);
+  } catch (e) {
+    liveFallback("Navegador não suporta EventSource.");
+    return;
+  }
+  state.live.es = es;
+  setLiveStatus("conectando…", "badge-warning");
+
+  es.onopen = () => setLiveStatus("ao vivo", "badge-success");
+  es.onmessage = (ev) => {
+    try {
+      const item = JSON.parse(ev.data);
+      prependLive(item);
+    } catch (_) { /* ignora payload inválido */ }
+  };
+  es.addEventListener("error", (ev) => {
+    // Pode ser erro de servidor (evento nomeado) ou queda de conexão.
+    if (ev && ev.data) {
+      try { const j = JSON.parse(ev.data); liveFallback(j.error || "erro no stream"); return; } catch (_) {}
+    }
+    if (es.readyState === EventSource.CLOSED) {
+      liveFallback("Conexão SSE encerrada.");
+    } else {
+      setLiveStatus("reconectando…", "badge-warning");
+    }
+  });
+}
+
+function stopLive() {
+  if (state.live.es) { try { state.live.es.close(); } catch (_) {} state.live.es = null; }
+  setLiveStatus("parado", "badge-ghost");
+}
+
+function liveFallback(msg) {
+  stopLive();
+  setLiveStatus("indisponível", "badge-error");
+  const area = $("#liveArea");
+  area.prepend(el("div", { class: "live-line text-warning" },
+    "⚠ Tail ao vivo indisponível: " + esc(msg) + " — use 'Aplicar' para recarregar manualmente."));
+}
+
+function setLiveStatus(text, cls) {
+  const b = $("#liveStatus");
+  b.className = "badge badge-sm " + cls;
+  b.textContent = text;
+}
+
+function prependLive(item) {
+  const area = $("#liveArea");
+  if (area.firstElementChild && area.firstElementChild.classList.contains("opacity-50")) {
+    area.firstElementChild.remove();
+  }
+  let line;
+  if (item && item.matched) {
+    const status = item.status ?? "";
+    line = `${item.ip || "-"}  ${item.time ? fmtLocal(item.time) : (item.time_raw || "-")}  ${item.method || "-"} ${item.path || "-"}  [${status}]  ${item.ua || ""}`;
+  } else {
+    line = (item && item.raw) ? item.raw : JSON.stringify(item);
+  }
+  const div = el("div", { class: "live-line" }, line);
+  area.prepend(div);
+  // Limita o histórico visível para não crescer indefinidamente.
+  while (area.childElementCount > 500) area.lastElementChild.remove();
+}
+
+/* ================================================================ PAGINAÇÃO */
+function updatePager(prefix, st) {
+  const pages = Math.max(1, Math.ceil((st.total || 0) / st.pageSize));
+  $("#" + prefix + "PageLbl").textContent = `${st.page} / ${pages}`;
+  $("#" + prefix + "Prev").disabled = st.page <= 1;
+  $("#" + prefix + "Next").disabled = st.page >= pages;
+  const info = $("#" + prefix + "Info");
+  if (info) {
+    const from = st.total === 0 ? 0 : (st.page - 1) * st.pageSize + 1;
+    const to = Math.min(st.page * st.pageSize, st.total);
+    info.textContent = `${fmtInt(from)}–${fmtInt(to)} de ${fmtInt(st.total)}`;
+  }
+}
+
+function pagerStep(st, delta, reload) {
+  const pages = Math.max(1, Math.ceil((st.total || 0) / st.pageSize));
+  const next = Math.min(Math.max(1, st.page + delta), pages);
+  if (next !== st.page) { st.page = next; reload(); }
+}
+
+/* ================================================================ BOOT / EVENTOS */
+function bootAfterAuth() {
+  loadHealth();
+  loadOrigins().then(() => {
+    if (state.mainTab === "crowdsec" && state.subTab === "painel") loadPainel();
+  });
+}
+
+function wireEvents() {
+  // Abas principais.
+  document.querySelectorAll("[data-main-tab]").forEach((a) =>
+    a.addEventListener("click", () => setMainTab(a.dataset.mainTab)));
+  // Sub-abas (CrowdSec).
+  document.querySelectorAll("[data-sub-tab]").forEach((a) =>
+    a.addEventListener("click", () => setSubTab(a.dataset.subTab)));
+  // Sub-abas (Logs).
+  document.querySelectorAll("[data-log-tab]").forEach((a) =>
+    a.addEventListener("click", () => setLogTab(a.dataset.logTab)));
+
+  // Navbar.
+  $("#btnTheme").addEventListener("click", toggleTheme);
+  $("#btnHelp").addEventListener("click", openHelp);
+  $("#btnHelpBack").addEventListener("click", closeHelp);
+  $("#btnHelpBack2").addEventListener("click", closeHelp);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#helpScreen").classList.contains("hidden")) closeHelp();
+  });
+  $("#btnLogout").addEventListener("click", logout);
+  $("#btnRefreshAll").addEventListener("click", () => {
+    loadHealth();
+    if (state.mainTab === "crowdsec") setSubTab(state.subTab);
+    else if (state.logTab === "estatisticas") loadLogStats();
+    else loadLogs();
+  });
+
+  // Login.
+  $("#loginForm").addEventListener("submit", submitLogin);
+
+  // Série temporal.
+  $("#tsDays").addEventListener("change", loadTimeseries);
+  $("#tsOrigin").addEventListener("change", loadTimeseries);
+
+  // Decisões.
+  $("#decApply").addEventListener("click", () => { state.decisions.page = 1; loadDecisions(); });
+  $("#decSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") { state.decisions.page = 1; loadDecisions(); } });
+  $("#decActiveOnly").addEventListener("change", () => { state.decisions.page = 1; loadDecisions(); });
+  $("#decPrev").addEventListener("click", () => pagerStep(state.decisions, -1, loadDecisions));
+  $("#decNext").addEventListener("click", () => pagerStep(state.decisions, +1, loadDecisions));
+  $("#btnBanGlobal").addEventListener("click", () => openBanModal("", () => loadDecisions()));
+
+  // Auditoria.
+  $("#audRefresh").addEventListener("click", () => { state.audit.page = 1; loadAudit(); });
+  $("#audPrev").addEventListener("click", () => pagerStep(state.audit, -1, loadAudit));
+  $("#audNext").addEventListener("click", () => pagerStep(state.audit, +1, loadAudit));
+
+  // Alertas.
+  $("#alSave").addEventListener("click", saveAlertConfig);
+  $("#alTest").addEventListener("click", testAlert);
+
+  // Modais.
+  wirePresetToggle($("#banDurPreset"), $("#banDurFree"));
+  wirePresetToggle($("#durPreset"), $("#durFree"));
+  $("#banConfirm").addEventListener("click", confirmBan);
+  $("#durConfirm").addEventListener("click", confirmDuration);
+
+  // Logs.
+  $("#logFile").addEventListener("change", () => {
+    state.logs.file = $("#logFile").value;
+    state.logs.page = 1;
+    if (state.live.on) startLive(); // reconecta no novo arquivo
+    loadLogs();
+    if (state.logTab === "estatisticas") loadLogStats();
+  });
+  $("#lgStatsLines").addEventListener("change", loadLogStats);
+  $("#lgApply").addEventListener("click", () => { state.logs.page = 1; loadLogs(); });
+  $("#lgQ").addEventListener("keydown", (e) => { if (e.key === "Enter") { state.logs.page = 1; loadLogs(); } });
+  $("#lgPrev").addEventListener("click", () => pagerStep(state.logs, -1, loadLogs));
+  $("#lgNext").addEventListener("click", () => pagerStep(state.logs, +1, loadLogs));
+  $("#lgStatsRefresh").addEventListener("click", loadLogStats);
+  $("#liveToggle").addEventListener("change", (e) => toggleLive(e.target.checked));
+  $("#liveClear").addEventListener("click", () => { $("#liveArea").innerHTML = ""; });
+}
+
+/* ---- Inicialização ---- */
+function init() {
+  wireEvents();
+  applyTheme(state.theme);   // aplica tema inicial + ícones + paleta de gráficos
+  // Estados iniciais das visões.
+  setMainTab("crowdsec");
+  setSubTab("painel");
+  bootAfterAuth();
+}
+
+// Chart.js pode ainda não estar disponível se o CDN atrasar; aguardamos.
+function whenReady() {
+  if (typeof Chart === "undefined") {
+    // Tenta novamente por até ~5s; sem Chart, os gráficos degradam mas o resto funciona.
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      if (typeof Chart !== "undefined" || tries > 25) {
+        clearInterval(iv);
+        if (typeof Chart !== "undefined") {
+          Chart.defaults.color = VIZ.ink2();
+          Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+        }
+        init();
+      }
+    }, 200);
+  } else {
+    Chart.defaults.color = VIZ.ink2();
+    Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+    init();
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", whenReady);
+} else {
+  whenReady();
+}
+</script>

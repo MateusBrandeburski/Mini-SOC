@@ -1,0 +1,34 @@
+# Exemplo de reverse proxy nginx para o Mini SOC (Security Operations Dashboard).
+# IMPORTANTE: NÃO exponha o painel na internet sem allowlist de IP / VPN /
+# basic-auth, ALÉM do login da própria aplicação.
+
+# (Opcional) HTTPS via certbot/letsencrypt no lugar de :80.
+server {
+    listen 80;
+    server_name painel.interno.exemplo;
+
+    # --- Allowlist de IPs (rede interna / VPN). Ajuste! ---
+    allow 10.0.0.0/8;
+    allow 172.16.0.0/12;
+    allow 192.168.0.0/16;
+    deny all;
+
+    # (Opcional) camada extra de basic-auth do nginx:
+    # auth_basic "Restrito";
+    # auth_basic_user_file /etc/nginx/.htpasswd;
+
+    location / {
+        proxy_pass http://127.0.0.1:8100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE (tail ao vivo dos logs): desabilita buffering e mantém conexão viva.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_set_header Connection "";
+    }
+}
