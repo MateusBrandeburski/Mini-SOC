@@ -55,17 +55,6 @@
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .tnum { font-variant-numeric: tabular-nums; }
 
-  /* Indicador de saúde (bolinha). */
-  .health-dot {
-    width: 0.75rem; height: 0.75rem; border-radius: 9999px;
-    display: inline-block; background: var(--viz-muted);
-    box-shadow: 0 0 0 0 rgba(0,0,0,0);
-    transition: background .3s, box-shadow .3s;
-  }
-  .health-dot.ok   { background: var(--st-good);    box-shadow: 0 0 8px 1px rgba(12,163,12,.6); }
-  .health-dot.bad  { background: var(--st-critical);box-shadow: 0 0 8px 1px rgba(208,59,59,.6); }
-  .health-dot.warn { background: var(--st-warning); box-shadow: 0 0 8px 1px rgba(250,178,25,.5); }
-
   /* Área de tail ao vivo. */
   #liveArea {
     max-height: 22rem; overflow-y: auto; overflow-x: auto;
@@ -127,7 +116,6 @@
         <div class="text-base sm:text-lg font-bold truncate">Mini SOC</div>
         <div class="text-[11px] opacity-60 truncate hidden sm:block">Security Operations Dashboard</div>
       </div>
-      <span id="healthDot" class="health-dot ml-1 sm:ml-3 shrink-0" title="Verificando saúde…"></span>
     </div>
     <div class="flex-none flex items-center gap-1.5">
       <!-- Alternador de tema (claro/escuro) -->
@@ -136,6 +124,29 @@
         <svg id="iconMoon" class="w-5 h-5 hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
       <button id="btnRefreshAll" class="btn btn-sm btn-ghost btn-circle" title="Atualizar tudo">↻</button>
+
+      <!-- Menu de configurações (engrenagem): páginas próprias de Alertas e
+           Auditoria, cada uma com seu path (/alertas, /auditoria). -->
+      <div class="dropdown dropdown-end">
+        <button id="btnGear" tabindex="0" class="btn btn-sm btn-ghost btn-circle" title="Configurações">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box shadow-lg z-[100] mt-1 w-48 p-1.5">
+          <li>
+            <a data-nav="alertas" href="/alertas">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              Alertas
+            </a>
+          </li>
+          <li>
+            <a data-nav="auditoria" href="/auditoria">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              Auditoria
+            </a>
+          </li>
+        </ul>
+      </div>
+
       <button id="btnHelp" class="btn btn-sm btn-ghost btn-circle" title="Ajuda / documentação">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       </button>
@@ -164,12 +175,11 @@
   <!-- ================================================================ ABA CROWDSEC -->
   <section data-panel="crowdsec">
 
-    <!-- Sub-abas do painel CrowdSec -->
+    <!-- Sub-abas do painel CrowdSec (Alertas e Auditoria migraram para páginas
+         próprias, acessíveis pelo menu de engrenagem na navbar). -->
     <div role="tablist" class="tabs tabs-bordered mb-4">
       <a role="tab" class="tab tab-active" data-sub-tab="painel">Painel</a>
       <a role="tab" class="tab" data-sub-tab="decisoes">Decisões</a>
-      <a role="tab" class="tab" data-sub-tab="alertas">Alertas</a>
-      <a role="tab" class="tab" data-sub-tab="auditoria">Auditoria</a>
     </div>
 
     <!-- ---- Sub-painel: Painel (stats + série + rankings) ---- -->
@@ -319,106 +329,6 @@
       </div>
     </div>
 
-    <!-- ---- Sub-painel: Alertas ---- -->
-    <div data-sub-panel="alertas" class="space-y-4 hidden">
-      <div class="card bg-base-200 shadow">
-        <div class="card-body p-4 gap-3">
-          <h2 class="card-title text-base">Configuração de alertas</h2>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label class="label cursor-pointer justify-start gap-3">
-              <input id="alEnabled" type="checkbox" class="toggle toggle-primary" />
-              <span class="label-text">Alertas habilitados</span>
-            </label>
-            <div></div>
-            <label class="form-control">
-              <span class="label-text text-xs">Origens (separadas por vírgula)</span>
-              <input id="alOrigins" type="text" class="input input-sm input-bordered" placeholder="crowdsec, cscli" />
-            </label>
-            <label class="form-control">
-              <span class="label-text text-xs">Cenários (vírgula; vazio = todos)</span>
-              <input id="alScenarios" type="text" class="input input-sm input-bordered" placeholder="crowdsecurity/http-probing" />
-            </label>
-            <label class="form-control">
-              <span class="label-text text-xs">Limiar: nº de alertas (0 = desativado)</span>
-              <input id="alThreshCount" type="number" min="0" class="input input-sm input-bordered" />
-            </label>
-            <label class="form-control">
-              <span class="label-text text-xs">Janela do limiar (minutos)</span>
-              <input id="alThreshMin" type="number" min="1" class="input input-sm input-bordered" />
-            </label>
-          </div>
-
-          <div class="divider my-1 text-xs opacity-70">Canais</div>
-          <div class="flex flex-wrap gap-6">
-            <label class="label cursor-pointer gap-2">
-              <input id="alChWebhook" type="checkbox" class="checkbox checkbox-sm" />
-              <span class="label-text">Webhook</span>
-            </label>
-            <label class="label cursor-pointer gap-2">
-              <input id="alChTelegram" type="checkbox" class="checkbox checkbox-sm" />
-              <span class="label-text">Telegram</span>
-            </label>
-            <label class="label cursor-pointer gap-2">
-              <input id="alChEmail" type="checkbox" class="checkbox checkbox-sm" />
-              <span class="label-text">E-mail</span>
-            </label>
-          </div>
-
-          <div class="flex flex-wrap gap-2 pt-1">
-            <button id="alSave" class="btn btn-sm btn-primary">Salvar</button>
-            <button id="alTest" class="btn btn-sm btn-outline">Enviar teste</button>
-            <span id="alTestResult" class="text-xs self-center opacity-80"></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="card bg-base-200 shadow">
-        <div class="card-body p-4">
-          <h2 class="card-title text-base">Histórico de alertas</h2>
-          <div class="table-scroll">
-            <table class="table table-sm table-zebra">
-              <thead>
-                <tr><th>Quando</th><th>IP</th><th>País</th><th>ASN</th><th>Cenário</th><th>Origem</th><th>Duração</th><th>Canais</th></tr>
-              </thead>
-              <tbody id="alHistBody">
-                <tr><td colspan="8" class="text-center opacity-60 py-6">carregando…</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ---- Sub-painel: Auditoria ---- -->
-    <div data-sub-panel="auditoria" class="space-y-4 hidden">
-      <div class="card bg-base-200 shadow">
-        <div class="card-body p-4">
-          <div class="flex items-center justify-between">
-            <h2 class="card-title text-base">Auditoria de ações</h2>
-            <button id="audRefresh" class="btn btn-sm btn-ghost">↻</button>
-          </div>
-          <div class="table-scroll">
-            <table class="table table-sm table-zebra">
-              <thead>
-                <tr><th></th><th>Quando</th><th>Ator</th><th>Ação</th><th>Alvo</th><th>Detalhe</th><th>Saída</th><th>OK</th></tr>
-              </thead>
-              <tbody id="audBody">
-                <tr><td colspan="8" class="text-center opacity-60 py-6">carregando…</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <span id="audInfo" class="text-xs opacity-70"></span>
-            <div class="join">
-              <button id="audPrev" class="btn btn-sm join-item">«</button>
-              <button class="btn btn-sm join-item pointer-events-none" id="audPageLbl">1</button>
-              <button id="audNext" class="btn btn-sm join-item">»</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
   </section>
 
   <!-- ================================================================ ABA LOGS -->
@@ -543,17 +453,23 @@
     <!-- ---- Sub-painel: Estatísticas (gráficos + tops do arquivo) ---- -->
     <div data-log-panel="estatisticas" class="space-y-4 hidden">
 
-      <!-- Barra de contexto do arquivo analisado -->
+      <!-- Barra de contexto do arquivo analisado. O seletor de arquivo aparece
+           aqui TAMBÉM (não só na Listagem), pois a estatística é condicionada a
+           ele; é o mesmo estado (state.logs.file), sincronizado entre as abas.
+           Campos alinhados pela base dos controles (items-end), com o meta
+           ("X de Y linhas") logo abaixo do seletor. -->
       <div class="card bg-base-200 shadow">
-        <div class="card-body p-4 flex-row flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-sm opacity-70">Arquivo:</span>
-            <span id="lgStatsFile" class="badge badge-neutral badge-sm mono">—</span>
-            <span id="lgStatsMeta" class="text-xs opacity-60"></span>
-          </div>
-          <div class="flex items-center gap-2">
+        <div class="card-body p-4">
+          <div class="flex flex-wrap items-end gap-x-4 gap-y-3">
             <label class="form-control">
-              <select id="lgStatsLines" class="select select-xs select-bordered">
+              <span class="label-text text-xs pb-1">Arquivo de log</span>
+              <select id="lgStatsFileSel" class="select select-sm select-bordered w-72 max-w-full">
+                <option value="">carregando arquivos…</option>
+              </select>
+            </label>
+            <label class="form-control">
+              <span class="label-text text-xs pb-1">Linhas lidas</span>
+              <select id="lgStatsLines" class="select select-sm select-bordered w-36">
                 <option value="2000">2.000 linhas</option>
                 <option value="5000" selected>5.000 linhas</option>
                 <option value="20000">20.000 linhas</option>
@@ -562,6 +478,7 @@
             </label>
             <button id="lgStatsRefresh" class="btn btn-sm btn-ghost btn-circle" title="Recalcular">↻</button>
           </div>
+          <div id="lgStatsMeta" class="text-xs opacity-60 mt-2"></div>
         </div>
       </div>
 
@@ -604,6 +521,116 @@
       </div>
 
     </div><!-- /sub-painel estatísticas -->
+  </section>
+
+  <!-- ================================================================ PÁGINA ALERTAS -->
+  <!-- Página própria (path /alertas), acessível pelo menu de engrenagem. -->
+  <section data-panel="alertas" class="hidden space-y-4">
+    <h1 class="text-xl font-bold flex items-center gap-2">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      Alertas
+    </h1>
+    <div class="card bg-base-200 shadow">
+      <div class="card-body p-4 gap-3">
+        <h2 class="card-title text-base">Configuração de alertas</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="label cursor-pointer justify-start gap-3">
+            <input id="alEnabled" type="checkbox" class="toggle toggle-primary" />
+            <span class="label-text">Alertas habilitados</span>
+          </label>
+          <div></div>
+          <label class="form-control">
+            <span class="label-text text-xs">Origens (separadas por vírgula)</span>
+            <input id="alOrigins" type="text" class="input input-sm input-bordered" placeholder="crowdsec, cscli" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Cenários (vírgula; vazio = todos)</span>
+            <input id="alScenarios" type="text" class="input input-sm input-bordered" placeholder="crowdsecurity/http-probing" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Limiar: nº de alertas (0 = desativado)</span>
+            <input id="alThreshCount" type="number" min="0" class="input input-sm input-bordered" />
+          </label>
+          <label class="form-control">
+            <span class="label-text text-xs">Janela do limiar (minutos)</span>
+            <input id="alThreshMin" type="number" min="1" class="input input-sm input-bordered" />
+          </label>
+        </div>
+
+        <div class="divider my-1 text-xs opacity-70">Canais</div>
+        <div class="flex flex-wrap gap-6">
+          <label class="label cursor-pointer gap-2">
+            <input id="alChWebhook" type="checkbox" class="checkbox checkbox-sm" />
+            <span class="label-text">Webhook</span>
+          </label>
+          <label class="label cursor-pointer gap-2">
+            <input id="alChTelegram" type="checkbox" class="checkbox checkbox-sm" />
+            <span class="label-text">Telegram</span>
+          </label>
+          <label class="label cursor-pointer gap-2">
+            <input id="alChEmail" type="checkbox" class="checkbox checkbox-sm" />
+            <span class="label-text">E-mail</span>
+          </label>
+        </div>
+
+        <div class="flex flex-wrap gap-2 pt-1">
+          <button id="alSave" class="btn btn-sm btn-primary">Salvar</button>
+          <button id="alTest" class="btn btn-sm btn-outline">Enviar teste</button>
+          <span id="alTestResult" class="text-xs self-center opacity-80"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card bg-base-200 shadow">
+      <div class="card-body p-4">
+        <h2 class="card-title text-base">Histórico de alertas</h2>
+        <div class="table-scroll">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr><th>Quando</th><th>IP</th><th>País</th><th>ASN</th><th>Cenário</th><th>Origem</th><th>Duração</th><th>Canais</th></tr>
+            </thead>
+            <tbody id="alHistBody">
+              <tr><td colspan="8" class="text-center opacity-60 py-6">carregando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ PÁGINA AUDITORIA -->
+  <!-- Página própria (path /auditoria), acessível pelo menu de engrenagem. -->
+  <section data-panel="auditoria" class="hidden space-y-4">
+    <h1 class="text-xl font-bold flex items-center gap-2">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Auditoria
+    </h1>
+    <div class="card bg-base-200 shadow">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="card-title text-base">Auditoria de ações</h2>
+          <button id="audRefresh" class="btn btn-sm btn-ghost">↻</button>
+        </div>
+        <div class="table-scroll">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr><th></th><th>Quando</th><th>Ator</th><th>Ação</th><th>Alvo</th><th>Detalhe</th><th>Saída</th><th>OK</th></tr>
+            </thead>
+            <tbody id="audBody">
+              <tr><td colspan="8" class="text-center opacity-60 py-6">carregando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <span id="audInfo" class="text-xs opacity-70"></span>
+          <div class="join">
+            <button id="audPrev" class="btn btn-sm join-item">«</button>
+            <button class="btn btn-sm join-item pointer-events-none" id="audPageLbl">1</button>
+            <button id="audNext" class="btn btn-sm join-item">»</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -795,6 +822,20 @@ País/ASN vivem na tabela `alerts` (join por `alert_decisions`). Hoje **nenhuma*
     --sf: 71.0000% 0.1560 74.0000;   /* secondary-focus                          */
     --sc: 22% 0.02 60;               /* secondary-content = marrom escuro        */
   }
+
+  /* Dropdown estilizado (enhanceSelect). O .menu do DaisyUI aplica
+     `flex-wrap: wrap`, que fazia os itens quebrarem em COLUNAS (layout apertado
+     + scroll horizontal). Forçamos coluna única aqui, com maior especificidade
+     que a classe utilitária, e deixamos os itens quebrarem o texto em linhas. */
+  .dd-select > .menu {
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+  }
+  .dd-select > .menu > li { width: 100%; }
+  .dd-select > .menu > li > a {
+    white-space: normal;          /* permite quebra de linha em nomes longos */
+    word-break: break-word;
+  }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -830,7 +871,7 @@ document.documentElement.setAttribute("data-theme", THEME_LIGHT);
 /* ---------------------------------------------------------------- Estado global */
 const state = {
   theme: THEME_LIGHT,
-  mainTab: "crowdsec",
+  view: "crowdsec",           // visão top-level atual: crowdsec | logs | alertas | auditoria
   subTab: "painel",
   logTab: "listagem",
   origins: [],
@@ -843,6 +884,7 @@ const state = {
   banContext: null,           // callback pós-ban (para refresh contextual)
   loginResolvers: [],         // filas de espera enquanto o login está aberto
   loginOpen: false,
+  geoip: {},                  // cache de sessão: ip -> resultado /api/geoip
 };
 
 // Cores das séries (paleta de gráficos). As séries s1–s8 servem em claro e
@@ -920,6 +962,163 @@ function countryCodeToFlag(cc) {
   if (!/^[A-Z]{2}$/.test(code)) return "🏳️";
   const base = 0x1f1e6;
   return String.fromCodePoint(base + (code.charCodeAt(0) - 65), base + (code.charCodeAt(1) - 65));
+}
+
+// Renderiza o resultado da geolocalização dentro de `slot` (bandeira, país, ISP).
+function renderGeoipInto(slot, g) {
+  slot.innerHTML = "";
+  if (!g || g.error) {
+    slot.append(el("span", { class: "text-error text-xs", title: (g && g.error) || "" }, "erro"));
+    return;
+  }
+  const cc = g.country_code || "";
+  const parts = [];
+  if (cc || g.country_name) {
+    parts.push(el("span", { class: "whitespace-nowrap", title: g.country_name || "" },
+      (cc ? countryCodeToFlag(cc) + " " : "") + (g.country_name || cc)));
+  }
+  if (g.isp) parts.push(el("span", { class: "opacity-70 truncate", title: g.isp }, g.isp));
+  if (!parts.length) { slot.append(el("span", { class: "opacity-60 text-xs" }, "sem dados")); return; }
+  const wrap = el("span", { class: "inline-flex items-center gap-2 text-xs" });
+  parts.forEach((p) => wrap.append(p));
+  if (g.cached) wrap.append(el("span", { class: "badge badge-ghost badge-xs", title: "resultado em cache" }, "cache"));
+  slot.append(wrap);
+}
+
+// Cria um botão de geolocalização + um slot para o resultado (ao lado do IP).
+// A busca é sob demanda: só chama /api/geoip quando clicado. O resultado fica
+// em cache no servidor (app.db) e também em cache de sessão (state.geoip).
+function geoipControl(ip) {
+  const wrap = el("span", { class: "inline-flex items-center gap-1 align-middle" });
+  const slot = el("span", { class: "geoip-slot" });
+  if (!ip || ip === "—") return wrap;
+
+  const btn = el("button", {
+    class: "btn btn-ghost btn-xs px-1",
+    title: "Geolocalizar este IP (iplocation.net)",
+  }, "🌐");
+
+  async function run() {
+    // Cache de sessão: evita rechamar a API dentro da mesma sessão.
+    if (state.geoip[ip]) { renderGeoipInto(slot, state.geoip[ip]); return; }
+    btn.disabled = true;
+    slot.innerHTML = "";
+    slot.append(el("span", { class: "loading loading-spinner loading-xs align-middle" }));
+    try {
+      const g = await apiFetch("/api/geoip?ip=" + encodeURIComponent(ip));
+      state.geoip[ip] = g;
+      renderGeoipInto(slot, g);
+    } catch (e) {
+      renderGeoipInto(slot, { error: e.message });
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  btn.addEventListener("click", run);
+  wrap.append(btn, slot);
+
+  // Se já buscamos este IP nesta sessão, mostra direto (sem novo clique).
+  if (state.geoip[ip]) renderGeoipInto(slot, state.geoip[ip]);
+  return wrap;
+}
+
+/* ---------------------------------------------------------------- Dropdown estilizado
+   Substitui a UI nativa do <select> (seta + lista do SO, não estilizáveis) por um
+   dropdown DaisyUI, mantendo o próprio <select> como fonte da verdade: o `.value`
+   e o evento `change` continuam funcionando, então nenhum código existente muda.
+
+   O <select> real fica visualmente oculto (mas presente no DOM). O botão-gatilho
+   espelha a opção selecionada; a lista é um <ul class="menu"> estilizado. Ao clicar
+   num item, ajustamos select.value e disparamos `change`. Reage a `options:changed`
+   (evento nosso) para reconstruir quando as opções são preenchidas via API. */
+function enhanceSelect(sel) {
+  if (!sel || sel.dataset.enhanced) return;
+  sel.dataset.enhanced = "1";
+
+  // Descobre o tamanho (select-xs/sm/…) para casar o botão com o restante do form.
+  const sizeCls = ["select-lg", "select-md", "select-sm", "select-xs"]
+    .find((c) => sel.classList.contains(c)) || "select-md";
+  const btnSize = { "select-lg": "btn-lg", "select-md": "btn-md", "select-sm": "btn-sm", "select-xs": "btn-xs" }[sizeCls];
+
+  // Copia largura/utilitários de layout do <select> para o wrapper, preservando o fluxo.
+  const widthCls = Array.from(sel.classList).filter((c) => /^w-|^max-w-|^min-w-/.test(c));
+
+  const dd = el("div", { class: "dropdown dd-select " + widthCls.join(" ") });
+  const trigger = el("button", {
+    type: "button", tabindex: "0",
+    class: `btn ${btnSize} btn-outline font-normal justify-between gap-2 normal-case w-full`,
+  });
+  const label = el("span", { class: "truncate text-left flex-1" }, "—");
+  const caret = el("span", { class: "opacity-60", "aria-hidden": "true", html: "&#9662;" }); // ▾
+  trigger.append(label, caret);
+  // flex-col + flex-nowrap: impede o DaisyUI de quebrar os itens em COLUNAS
+  // (era o que gerava o layout apertado + scroll horizontal). A lista estica em
+  // largura conforme o conteúdo (w-max), começando pela largura do gatilho
+  // (min-w-full) e limitada a um teto para não vazar a tela.
+  const list = el("ul", {
+    tabindex: "0",
+    class: "dropdown-content menu flex-col flex-nowrap bg-base-100 rounded-box shadow-lg z-[90] p-1.5 mt-1 " +
+           "w-max min-w-full max-w-[min(90vw,34rem)] max-h-72 overflow-y-auto overflow-x-hidden",
+  });
+  dd.append(trigger, list);
+
+  // Move o <select> nativo para dentro do wrapper e o esconde acessivelmente.
+  sel.parentNode.insertBefore(dd, sel);
+  dd.appendChild(sel);
+  sel.classList.add("sr-only");
+  sel.setAttribute("aria-hidden", "true");
+  sel.tabIndex = -1;
+
+  function close() { if (document.activeElement) document.activeElement.blur(); dd.classList.remove("dropdown-open"); }
+
+  function rebuild() {
+    list.innerHTML = "";
+    const current = sel.value;
+    let currentText = "";
+    // Percorre em ordem, respeitando <optgroup> como cabeçalho de seção.
+    for (const node of sel.children) {
+      if (node.tagName === "OPTGROUP") {
+        list.append(el("li", { class: "menu-title px-3 pt-2 pb-1 text-xs opacity-60" }, node.label));
+        for (const opt of node.children) addItem(opt);
+      } else if (node.tagName === "OPTION") {
+        addItem(node);
+      }
+    }
+    function addItem(opt) {
+      const selectedNow = opt.value === current || (opt.selected && !current && current !== "");
+      if (opt.value === current) currentText = opt.textContent;
+      const a = el("a", {
+        // items-start: com texto em várias linhas, o ✓ alinha no topo (não no centro).
+        class: "flex items-start gap-2 " + (opt.value === current ? "active font-medium" : ""),
+        onclick: () => {
+          if (sel.value !== opt.value) {
+            sel.value = opt.value;
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          close();
+        },
+      });
+      if (opt.value === current) a.append(el("span", { class: "text-xs mt-0.5", html: "&#10003;" })); // ✓
+      // Quebra em várias linhas quando o rótulo é muito grande (sem cortar/truncar).
+      a.append(el("span", { class: "flex-1 whitespace-normal break-words" }, opt.textContent));
+      list.append(el("li", {}, a));
+    }
+    label.textContent = currentText || (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : "—");
+    label.title = label.textContent;
+  }
+
+  trigger.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") close();
+  });
+  // Mantém o gatilho sincronizado quando o valor muda por qualquer via (usuário ou código).
+  sel.addEventListener("change", rebuild);
+  sel.addEventListener("options:changed", rebuild);
+  rebuild();
+}
+
+// Estiliza todos os <select> da página (idempotente; chamável após inserir novos).
+function enhanceAllSelects(root = document) {
+  root.querySelectorAll("select").forEach(enhanceSelect);
 }
 
 // Formata bytes de forma compacta.
@@ -1146,18 +1345,81 @@ function baseScales(opts = {}) {
   };
 }
 
-/* ---------------------------------------------------------------- Navegação de abas */
-function setMainTab(tab) {
-  state.mainTab = tab;
-  document.querySelectorAll("[data-main-tab]").forEach((a) =>
-    a.classList.toggle("tab-active", a.dataset.mainTab === tab));
-  document.querySelectorAll("[data-panel]").forEach((p) =>
-    p.classList.toggle("hidden", p.dataset.panel !== tab));
-  if (tab === "crowdsec") { /* já carregado conforme sub-aba */ }
-  if (tab === "logs") { ensureLogsLoaded(); }
+/* ---------------------------------------------------------------- Roteamento por path
+   Router leve baseado na History API. A URL reflete TANTO a visão top-level QUANTO
+   a sub-aba, então F5/bookmark preservam exatamente a tela. Formato:
+     /crowdsec/painel   /crowdsec/decisoes
+     /logs/listagem     /logs/estatisticas
+     /alertas           /auditoria
+   O backend serve o mesmo index.html em todos esses paths. */
+const VIEWS = {
+  crowdsec:  { subs: ["painel", "decisoes"], defaultSub: "painel" },
+  logs:      { subs: ["listagem", "estatisticas"], defaultSub: "listagem" },
+  alertas:   {},
+  auditoria: {},
+};
+
+// Interpreta o pathname → {view, sub}. Tolera paths curtos (/crowdsec) e inválidos.
+function parseRoute(pathname) {
+  const parts = (pathname || "/").split("/").filter(Boolean);
+  let view = parts[0] || "crowdsec";
+  if (!VIEWS[view]) view = "crowdsec";
+  const conf = VIEWS[view];
+  let sub = null;
+  if (conf.subs) sub = (parts[1] && conf.subs.includes(parts[1])) ? parts[1] : conf.defaultSub;
+  return { view, sub };
 }
 
-function setSubTab(tab) {
+// Monta o path canônico de (view, sub).
+function pathFor(view, sub) {
+  if (!VIEWS[view]) view = "crowdsec";
+  const conf = VIEWS[view];
+  if (conf.subs) {
+    const s = (sub && conf.subs.includes(sub)) ? sub : conf.defaultSub;
+    return "/" + view + "/" + s;
+  }
+  return "/" + view;
+}
+
+// Navega para (view, sub). push=true empilha no histórico (clique de aba);
+// false apenas reflete o estado (boot/popstate). sub=null => usa a sub-aba
+// lembrada da visão (ou a padrão).
+function navigate(view, sub = null, { push = true } = {}) {
+  if (!VIEWS[view]) view = "crowdsec";
+  const conf = VIEWS[view];
+  if (conf.subs) {
+    if (!(sub && conf.subs.includes(sub))) {
+      sub = (view === "crowdsec" ? state.subTab : state.logTab) || conf.defaultSub;
+      if (!conf.subs.includes(sub)) sub = conf.defaultSub;
+    }
+  } else {
+    sub = null;
+  }
+  state.view = view;
+  // Seções top-level.
+  document.querySelectorAll("[data-panel]").forEach((p) =>
+    p.classList.toggle("hidden", p.dataset.panel !== view));
+  // Abas principais (só crowdsec/logs) e menu de engrenagem (alertas/auditoria).
+  document.querySelectorAll("[data-main-tab]").forEach((a) =>
+    a.classList.toggle("tab-active", a.dataset.mainTab === view));
+  document.querySelectorAll("[data-nav]").forEach((a) =>
+    a.classList.toggle("active", a.dataset.nav === view));
+  // URL (canônica). push no clique; replace no boot/popstate.
+  const path = pathFor(view, sub);
+  if (window.location.pathname !== path) {
+    if (push) window.history.pushState({ view, sub }, "", path);
+    else window.history.replaceState({ view, sub }, "", path);
+  }
+  // Aplica sub-aba + dispara carregadores da visão.
+  if (view === "crowdsec") applySubTab(sub);
+  else if (view === "logs") { ensureLogsLoaded(); applyLogTab(sub); }
+  else if (view === "alertas") { loadAlertConfig(); loadAlertHistory(); }
+  else if (view === "auditoria") loadAudit();
+}
+
+// Aplica a sub-aba do CrowdSec (DOM + carregador). NÃO mexe na URL — isso é
+// responsabilidade do navigate(). Os cliques de sub-aba passam por navigate().
+function applySubTab(tab) {
   state.subTab = tab;
   document.querySelectorAll("[data-sub-tab]").forEach((a) =>
     a.classList.toggle("tab-active", a.dataset.subTab === tab));
@@ -1165,12 +1427,10 @@ function setSubTab(tab) {
     p.classList.toggle("hidden", p.dataset.subPanel !== tab));
   if (tab === "painel") loadPainel();
   else if (tab === "decisoes") loadDecisions();
-  else if (tab === "alertas") { loadAlertConfig(); loadAlertHistory(); }
-  else if (tab === "auditoria") loadAudit();
 }
 
-/* Sub-abas da aba Logs (namespace próprio para não colidir com data-sub-tab). */
-function setLogTab(tab) {
+// Aplica a sub-aba dos Logs (DOM + carregador). NÃO mexe na URL.
+function applyLogTab(tab) {
   state.logTab = tab;
   document.querySelectorAll("[data-log-tab]").forEach((a) =>
     a.classList.toggle("tab-active", a.dataset.logTab === tab));
@@ -1182,29 +1442,8 @@ function setLogTab(tab) {
 
 /* ================================================================ SAÚDE */
 async function loadHealth() {
-  // Só a bolinha indica o estado (verde/vermelho/âmbar); o texto foi removido.
-  // O detalhe fica no tooltip (title) ao passar o mouse.
-  const dot = $("#healthDot");
-  const base = "health-dot ml-1 sm:ml-3 shrink-0";
-  try {
-    const h = await apiFetch("/api/health");
-    state.health = h;
-    const cs = h.crowdsec || {};
-    if (h.ok) {
-      dot.className = base + " ok";
-      dot.title = `CrowdSec OK (${cs.backend || "?"}, ${fmtInt(cs.decisions ?? 0)} decisões)`;
-    } else {
-      dot.className = base + " bad";
-      dot.title = "CrowdSec indisponível: " + (cs.error || "erro desconhecido");
-    }
-    if (!h.cscli_available) {
-      dot.className = base + " warn";
-      dot.title += " · cscli não encontrado (ações de escrita indisponíveis)";
-    }
-  } catch (e) {
-    dot.className = base + " bad";
-    dot.title = "Falha ao consultar saúde: " + e.message;
-  }
+  // O indicador de saúde (bolinha) foi removido do cabeçalho; nada a atualizar.
+  // Mantido como no-op para preservar as chamadas existentes (boot/refresh).
 }
 
 /* ================================================================ ORIGENS */
@@ -1394,8 +1633,11 @@ function renderDecisions(items) {
     const badges = el("span", { class: "flex items-center gap-1" });
     badges.append(el("span", { class: `badge ${ub.cls} badge-sm` }, ub.text));
 
+    const decIpCell = el("td", { class: "mono text-xs whitespace-nowrap" }, it.value ?? "—");
+    decIpCell.append(" ", geoipControl(it.value));
+
     body.append(el("tr", {},
-      el("td", { class: "mono text-xs whitespace-nowrap" }, it.value ?? "—"),
+      decIpCell,
       el("td", { class: "whitespace-nowrap" }, flag),
       el("td", { class: "mono text-xs whitespace-nowrap", title: it.as_name || "" }, asn),
       el("td", { class: "text-xs" }, it.scenario ?? "—"),
@@ -1696,10 +1938,10 @@ function reportWriteError(e, label) {
 // Após qualquer escrita, atualiza saúde/estatística e a visão atual.
 async function refreshAfterWrite() {
   loadHealth();
-  if (state.mainTab === "crowdsec") {
+  if (state.view === "crowdsec") {
     if (state.subTab === "decisoes") loadDecisions();
     else if (state.subTab === "painel") loadStats();
-  } else if (state.mainTab === "logs") {
+  } else if (state.view === "logs") {
     loadLogs();
   }
 }
@@ -1713,38 +1955,68 @@ async function ensureLogsLoaded() {
   }
 }
 
+// Preenche um <select> de arquivos. Lista única (sem cabeçalhos de seção): só o
+// nome do arquivo, atuais primeiro e depois os rotacionados. Reutilizado pelos
+// dois seletores (Listagem e Estatísticas), que compartilham o estado.
+function fillFileSelect(sel, files, selected) {
+  sel.innerHTML = "";
+  const atuais = files.filter((f) => !f.rotated);
+  const rotac = files.filter((f) => f.rotated);
+  for (const f of [...atuais, ...rotac]) {
+    const opt = el("option", { value: f.name }, f.name);
+    if (f.name === selected) opt.selected = true;
+    sel.append(opt);
+  }
+  if (selected) sel.value = selected;
+  // Avisa qualquer dropdown estilizado acoplado a este <select> que as opções mudaram.
+  sel.dispatchEvent(new CustomEvent("options:changed"));
+}
+
+// Define o arquivo de log ativo (estado único), sincroniza AMBOS os seletores e
+// recarrega a visão corrente. `origin` evita loop ao ser chamado pelo próprio select.
+function setLogFile(name, origin) {
+  state.logs.file = name;
+  state.logs.page = 1;
+  for (const id of ["#logFile", "#lgStatsFileSel"]) {
+    const s = $(id);
+    if (s && s !== origin && s.value !== name) {
+      s.value = name;
+      s.dispatchEvent(new CustomEvent("options:changed")); // re-sincroniza o dropdown estilizado
+    }
+  }
+  if (state.live.on) startLive();       // reconecta o tail no novo arquivo
+  loadLogs();
+  loadLogStats();                        // stats dependem do arquivo; mantém a outra aba pronta
+}
+
 async function loadLogFiles() {
   const sel = $("#logFile");
+  const selStats = $("#lgStatsFileSel");
   try {
     const files = await apiFetch("/api/logs/files");
-    sel.innerHTML = "";
     if (!files || !files.length) {
+      sel.innerHTML = "";
       sel.append(el("option", { value: "" }, "nenhum arquivo encontrado"));
+      sel.dispatchEvent(new CustomEvent("options:changed"));
+      if (selStats) {
+        selStats.innerHTML = "";
+        selStats.append(el("option", { value: "" }, "nenhum arquivo encontrado"));
+        selStats.dispatchEvent(new CustomEvent("options:changed"));
+      }
       $("#lgBody").innerHTML = "";
       $("#lgBody").append(el("tr", {}, el("td", { colspan: "10", class: "text-center opacity-60 py-6" }, "Nenhum arquivo de log disponível.")));
       return;
     }
-    // Separa logs atuais (não rotacionados) dos rotacionados, para clareza.
-    const atuais = files.filter((f) => !f.rotated);
-    const rotac = files.filter((f) => f.rotated);
-    const optLabel = (f) => {
-      const site = f.site && f.site !== "" ? f.site : "genérico";
-      return `${site} — ${f.name} (${fmtBytes(f.size)})${f.gz ? " · gz" : ""}`;
-    };
-    const addGroup = (label, arr) => {
-      if (!arr.length) return;
-      const g = el("optgroup", { label });
-      for (const f of arr) g.append(el("option", { value: f.name }, optLabel(f)));
-      sel.append(g);
-    };
-    addGroup("Sites (atuais)", atuais);
-    addGroup("Rotacionados / históricos", rotac);
+    const current = state.logs.file || files[0].name;
+    fillFileSelect(sel, files, current);
+    if (selStats) fillFileSelect(selStats, files, current);
     state.logs.file = sel.value;
     loadLogs();
     if (state.logTab === "estatisticas") loadLogStats();
   } catch (e) {
     sel.innerHTML = "";
     sel.append(el("option", { value: "" }, "erro ao listar"));
+    sel.dispatchEvent(new CustomEvent("options:changed"));
     toast("Erro ao listar arquivos de log: " + e.message, "error");
   }
 }
@@ -1826,6 +2098,7 @@ function renderLogs(items) {
         title: "IP da Cloudflare — o IP real do visitante depende do log_format do site (CF-Connecting-IP)",
       }, "CF"));
     }
+    ipCell.append(" ", geoipControl(it.ip));
 
     // Célula de acesso / domínio: como o visitante chegou (domínio ou IP direto).
     const via = it.access_via || it.site || "—";
@@ -1855,9 +2128,8 @@ function renderLogs(items) {
 /* ---- Estatísticas dos logs ---- */
 async function loadLogStats() {
   const file = state.logs.file || $("#logFile").value;
-  const fileBadge = $("#lgStatsFile"), meta = $("#lgStatsMeta");
-  if (fileBadge) fileBadge.textContent = file || "—";
-  if (!file) { if (meta) meta.textContent = "selecione um arquivo na aba Listagem"; return; }
+  const meta = $("#lgStatsMeta");
+  if (!file) { if (meta) meta.textContent = "selecione um arquivo"; return; }
   const lines = ($("#lgStatsLines") && $("#lgStatsLines").value) || "5000";
   if (meta) meta.textContent = "calculando…";
   let res;
@@ -2057,20 +2329,32 @@ function pagerStep(st, delta, reload) {
 function bootAfterAuth() {
   loadHealth();
   loadOrigins().then(() => {
-    if (state.mainTab === "crowdsec" && state.subTab === "painel") loadPainel();
+    if (state.view === "crowdsec" && state.subTab === "painel") loadPainel();
   });
 }
 
 function wireEvents() {
-  // Abas principais.
+  // Abas principais (CrowdSec / Logs) — cada uma navega para seu path.
   document.querySelectorAll("[data-main-tab]").forEach((a) =>
-    a.addEventListener("click", () => setMainTab(a.dataset.mainTab)));
-  // Sub-abas (CrowdSec).
+    a.addEventListener("click", () => navigate(a.dataset.mainTab)));
+  // Menu de engrenagem (Alertas / Auditoria) — páginas próprias.
+  document.querySelectorAll("[data-nav]").forEach((a) =>
+    a.addEventListener("click", (e) => {
+      e.preventDefault();                 // não deixa o href navegar de verdade
+      if (document.activeElement) document.activeElement.blur(); // fecha o dropdown
+      navigate(a.dataset.nav);
+    }));
+  // Sub-abas (CrowdSec) — passam por navigate() para gravar a sub-aba na URL.
   document.querySelectorAll("[data-sub-tab]").forEach((a) =>
-    a.addEventListener("click", () => setSubTab(a.dataset.subTab)));
-  // Sub-abas (Logs).
+    a.addEventListener("click", () => navigate("crowdsec", a.dataset.subTab)));
+  // Sub-abas (Logs) — idem.
   document.querySelectorAll("[data-log-tab]").forEach((a) =>
-    a.addEventListener("click", () => setLogTab(a.dataset.logTab)));
+    a.addEventListener("click", () => navigate("logs", a.dataset.logTab)));
+  // Voltar/avançar do navegador: reflete a URL (sem novo push).
+  window.addEventListener("popstate", () => {
+    const r = parseRoute(window.location.pathname);
+    navigate(r.view, r.sub, { push: false });
+  });
 
   // Navbar.
   $("#btnTheme").addEventListener("click", toggleTheme);
@@ -2083,9 +2367,10 @@ function wireEvents() {
   $("#btnLogout").addEventListener("click", logout);
   $("#btnRefreshAll").addEventListener("click", () => {
     loadHealth();
-    if (state.mainTab === "crowdsec") setSubTab(state.subTab);
-    else if (state.logTab === "estatisticas") loadLogStats();
-    else loadLogs();
+    if (state.view === "crowdsec") applySubTab(state.subTab);
+    else if (state.view === "alertas") { loadAlertConfig(); loadAlertHistory(); }
+    else if (state.view === "auditoria") loadAudit();
+    else if (state.view === "logs") { if (state.logTab === "estatisticas") loadLogStats(); else loadLogs(); }
   });
 
   // Login.
@@ -2118,14 +2403,10 @@ function wireEvents() {
   $("#banConfirm").addEventListener("click", confirmBan);
   $("#durConfirm").addEventListener("click", confirmDuration);
 
-  // Logs.
-  $("#logFile").addEventListener("change", () => {
-    state.logs.file = $("#logFile").value;
-    state.logs.page = 1;
-    if (state.live.on) startLive(); // reconecta no novo arquivo
-    loadLogs();
-    if (state.logTab === "estatisticas") loadLogStats();
-  });
+  // Logs. Os dois seletores de arquivo (Listagem e Estatísticas) compartilham o
+  // mesmo estado via setLogFile(), que sincroniza ambos.
+  $("#logFile").addEventListener("change", (e) => setLogFile(e.target.value, e.target));
+  $("#lgStatsFileSel").addEventListener("change", (e) => setLogFile(e.target.value, e.target));
   $("#lgStatsLines").addEventListener("change", loadLogStats);
   $("#lgApply").addEventListener("click", () => { state.logs.page = 1; loadLogs(); });
   $("#lgQ").addEventListener("keydown", (e) => { if (e.key === "Enter") { state.logs.page = 1; loadLogs(); } });
@@ -2139,10 +2420,12 @@ function wireEvents() {
 /* ---- Inicialização ---- */
 function init() {
   wireEvents();
+  enhanceAllSelects();       // troca a UI nativa dos <select> por dropdowns DaisyUI
   applyTheme(state.theme);   // aplica tema inicial + ícones + paleta de gráficos
-  // Estados iniciais das visões.
-  setMainTab("crowdsec");
-  setSubTab("painel");
+  // Roteia pela URL atual (permite abrir direto em /crowdsec/decisoes,
+  // /logs/estatisticas, /alertas…). navigate() canoniza a URL via replaceState.
+  const r = parseRoute(window.location.pathname);
+  navigate(r.view, r.sub, { push: false });
   bootAfterAuth();
 }
 

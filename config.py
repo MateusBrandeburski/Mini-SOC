@@ -89,6 +89,10 @@ class Settings:
     session_max_age: int = field(default_factory=lambda: _get_int("SESSION_MAX_AGE", 60 * 60 * 12))
     cookie_secure: bool = field(default_factory=lambda: _get_bool("COOKIE_SECURE", False))
 
+    # ------------------------------------------------------------------ Geolocalização de IP
+    iplocation_api_key: str = field(default_factory=lambda: _get("IPLOCATION_API_KEY", ""))
+    geoip_cache_ttl_days: int = field(default_factory=lambda: _get_int("GEOIP_CACHE_TTL_DAYS", 30))
+
     # ------------------------------------------------------------------ Nginx logs
     nginx_log_glob: str = field(default_factory=lambda: _get("NGINX_LOG_GLOB", "/var/log/nginx/*access.log*"))
     nginx_log_format_regex: str = field(default_factory=lambda: _get("NGINX_LOG_FORMAT_REGEX", DEFAULT_NGINX_REGEX))

@@ -402,8 +402,14 @@ async def check_and_notify() -> None:
             if not _scenario_allowed(decision, scenarios):
                 continue
 
-            # --- Threshold: só ENVIA se ultrapassar o limite na janela. ---
+            # Sem NENHUM canal habilitado não há alerta a emitir: não registramos
+            # nada no histórico (senão apareceriam "alertas emitidos" fantasmas,
+            # mesmo sem nenhum canal/app configurado). A marca d'água ainda avança.
             channels = _enabled_channels(cfg)
+            if not any(channels.values()):
+                continue
+
+            # --- Threshold: só ENVIA se ultrapassar o limite na janela. ---
             if threshold_count > 0:
                 recent = await asyncio.to_thread(db.count_recent_alerts, threshold_minutes)
                 # +1 conta o alerta atual que estamos avaliando.

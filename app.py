@@ -30,6 +30,7 @@ import alerts
 import auth
 import crowdsec
 import db
+import geoip
 from config import settings
 
 STATIC_DIR = settings.base_dir / "static"
@@ -108,13 +109,33 @@ async def logout():
 
 
 # ============================================================================ SPA
-@app.get("/")
-async def index(request: Request):
+def _serve_index() -> FileResponse | JSONResponse:
     # Se não autenticado, ainda servimos a página; a SPA detecta 401 nas chamadas
     # /api e exibe o overlay de login. (Mantém uma única página.)
     if not INDEX_FILE.exists():
         return JSONResponse({"error": "static/index.html não encontrado"}, status_code=500)
     return FileResponse(str(INDEX_FILE))
+
+
+# A SPA roteia no cliente (History API), mas servimos o MESMO index.html em cada
+# path conhecido para que refresh/bookmark direto (/crowdsec/decisoes,
+# /logs/estatisticas, /alertas…) funcione. Rotas EXPLÍCITAS (não um catch-all)
+# para não sombrear /api/* nem /static.
+@app.get("/")
+@app.get("/crowdsec")
+@app.get("/logs")
+@app.get("/alertas")
+@app.get("/auditoria")
+async def index(request: Request):
+    return _serve_index()
+
+
+# Paths com sub-aba (2º segmento). O cliente valida qual sub-aba é; aqui só
+# devolvemos o index. Não conflita com /api/logs/... (prefixo /api distinto).
+@app.get("/crowdsec/{sub}")
+@app.get("/logs/{sub}")
+async def index_sub(sub: str, request: Request):
+    return _serve_index()
 
 
 # ============================================================================ API (leitura)
@@ -157,6 +178,15 @@ async def api_top(
 @app.get("/api/origins")
 async def api_origins(user: str = Depends(auth.require_auth)):
     return crowdsec.get_origins()
+
+
+@app.get("/api/geoip")
+async def api_geoip(ip: str = Query(...), user: str = Depends(auth.require_auth)):
+    """Geolocaliza um IP sob demanda (botão na tabela). Usa cache no app.db."""
+    try:
+        return await geoip.lookup(ip)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.get("/api/decisions")

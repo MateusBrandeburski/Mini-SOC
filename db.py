@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS alert_history (
     result        TEXT                  -- JSON: por canal, ok/erro
 );
 
+CREATE TABLE IF NOT EXISTS geoip_cache (
+    ip            TEXT PRIMARY KEY,
+    fetched_at    TEXT NOT NULL,         -- ISO8601 UTC de quando foi buscado
+    data          TEXT NOT NULL          -- JSON com a resposta normalizada
+);
+
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 CREATE INDEX IF NOT EXISTS idx_alert_ts ON alert_history(ts);
 """
@@ -299,3 +305,44 @@ def count_recent_alerts(minutes: int) -> int:
             (f"-{int(minutes)} minutes",),
         )
         return int(cur.fetchone()["n"])
+
+
+# ------------------------------------------------------------- cache geoip
+def get_geoip_cache(ip: str, ttl_days: int = 0) -> dict[str, Any] | None:
+    """Retorna o registro em cache para `ip`, ou None se ausente/expirado.
+
+    ttl_days=0 => nunca expira. O filtro de validade é feito em SQL para
+    aproveitar o relógio do próprio SQLite (UTC).
+    """
+    with _lock:
+        conn = _require_conn()
+        if ttl_days and ttl_days > 0:
+            cur = conn.execute(
+                "SELECT ip, fetched_at, data FROM geoip_cache "
+                "WHERE ip=? AND fetched_at >= datetime('now', ?)",
+                (ip, f"-{int(ttl_days)} days"),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT ip, fetched_at, data FROM geoip_cache WHERE ip=?", (ip,)
+            )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    try:
+        data = json.loads(row["data"])
+    except (ValueError, TypeError):
+        return None
+    return {"ip": row["ip"], "fetched_at": row["fetched_at"], "cached": True, **data}
+
+
+def set_geoip_cache(ip: str, data: dict[str, Any]) -> None:
+    """Grava/atualiza o cache de geolocalização de `ip`."""
+    with _lock:
+        conn = _require_conn()
+        conn.execute(
+            "INSERT INTO geoip_cache(ip, fetched_at, data) VALUES(?,?,?) "
+            "ON CONFLICT(ip) DO UPDATE SET fetched_at=excluded.fetched_at, data=excluded.data",
+            (ip, _now_iso(), json.dumps(data)),
+        )
+        conn.commit()
