@@ -2481,9 +2481,17 @@ function openLogDetail(it) {
     ? el("span", { class: "badge badge-error badge-sm" }, "sim")
     : el("span", { class: "badge badge-ghost badge-sm" }, "não"));
 
-  // Botão "Banir este IP": fecha o detalhe e abre o modal de banir.
-  const banBtn = $("#logDetailBan");
-  banBtn.onclick = () => { $("#logDetailModal").close(); openBanModal(it.ip, () => loadLogs()); };
+  // Botão de ação: "Desbanir" se o IP já está banido, senão "Banir" (nunca os dois).
+  const actBtn = $("#logDetailBan");
+  if (it.banned) {
+    actBtn.textContent = "Desbanir este IP";
+    actBtn.className = "btn btn-sm btn-outline btn-success";
+    actBtn.onclick = () => { $("#logDetailModal").close(); quickUnban(it.ip); };
+  } else {
+    actBtn.textContent = "Banir este IP";
+    actBtn.className = "btn btn-sm btn-error btn-outline";
+    actBtn.onclick = () => { $("#logDetailModal").close(); openBanModal(it.ip, () => loadLogs()); };
+  }
 
   $("#logDetailModal").showModal();
 }
