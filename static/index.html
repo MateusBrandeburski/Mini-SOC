@@ -1772,8 +1772,67 @@ async function loadDecisions() {
   }
 }
 
+// Menu de ações por linha. O dropdown do DaisyUI é posicionado com `absolute`
+// DENTRO da célula, mas a tabela vive num `.table-scroll` (overflow) que o recorta
+// — abrindo "para dentro" da tabela. Aqui usamos um menu com `position: fixed`
+// anexado ao <body>, que ESCAPA o overflow e abre para fora, com auto-flip
+// (baixo por padrão; cima se não couber) e alinhado à direita do botão.
+let _openRowMenu = null;
+function closeRowMenu() {
+  if (_openRowMenu) { _openRowMenu(); _openRowMenu = null; }
+}
+function rowActionMenu(actions) {
+  const wrap = el("span", { class: "inline-block" });
+  const btn = el("button", { class: "btn btn-xs btn-ghost", title: "Ações", "aria-label": "Ações" }, "⋯");
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (_openRowMenu) { closeRowMenu(); return; }  // toggle
+    const menu = el("ul", {
+      class: "menu bg-base-100 rounded-box shadow-lg p-1.5 w-52",
+      style: "position:fixed; z-index:9999;",
+    });
+    for (const a of actions) {
+      menu.append(el("li", {}, el("a", {
+        class: a.className || "",
+        onclick: () => { closeRowMenu(); a.onClick(); },
+      }, a.label)));
+    }
+    document.body.appendChild(menu);
+    // Posiciona relativo ao botão (fixed = coords de viewport).
+    const r = btn.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let top = r.bottom + 4;
+    if (top + mh > vh - 8) top = Math.max(8, r.top - mh - 4);   // sem espaço embaixo → abre p/ cima
+    let left = r.right - mw;                                     // alinhado à direita do botão
+    left = Math.min(Math.max(8, left), vw - mw - 8);            // clampa na viewport
+    menu.style.top = top + "px";
+    menu.style.left = left + "px";
+
+    const onDoc = (e) => { if (!menu.contains(e.target) && e.target !== btn) closeRowMenu(); };
+    const onKey = (e) => { if (e.key === "Escape") closeRowMenu(); };
+    // fecha em scroll (fixed descolaria) e resize.
+    _openRowMenu = () => {
+      menu.remove();
+      document.removeEventListener("mousedown", onDoc, true);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", closeRowMenu, true);
+      window.removeEventListener("resize", closeRowMenu);
+    };
+    setTimeout(() => {   // evita fechar pelo próprio clique de abertura
+      document.addEventListener("mousedown", onDoc, true);
+      document.addEventListener("keydown", onKey, true);
+      window.addEventListener("scroll", closeRowMenu, true);
+      window.addEventListener("resize", closeRowMenu);
+    }, 0);
+  });
+  wrap.append(btn);
+  return wrap;
+}
+
 function renderDecisions(items) {
   const body = $("#decBody");
+  closeRowMenu();          // evita menu órfão (position:fixed no body) após re-render
   body.innerHTML = "";
   if (!items.length) {
     body.append(el("tr", {}, el("td", { colspan: "10", class: "text-center opacity-60 py-6" }, "Nenhuma decisão encontrada.")));
@@ -1784,14 +1843,12 @@ function renderDecisions(items) {
     const asn = it.as_number ? ("AS" + it.as_number) : (it.as_name || "—");
     const flag = it.country ? countryCodeToFlag(it.country) + " " + esc(it.country) : "—";
 
-    // Menu de ações por linha (dropdown DaisyUI).
-    const menu = el("div", { class: "dropdown dropdown-end dropdown-top" });
-    const trigger = el("label", { tabindex: "0", class: "btn btn-xs btn-ghost" }, "⋯");
-    const ul = el("ul", { tabindex: "0", class: "dropdown-content menu bg-base-100 rounded-box shadow z-[80] w-52 p-2" });
-    ul.append(el("li", {}, el("a", { onclick: () => openDurationModal(it.value) }, "Alterar duração")));
-    ul.append(el("li", {}, el("a", { onclick: () => makePermanent(it.value) }, "Tornar permanente")));
-    ul.append(el("li", {}, el("a", { class: "text-error", onclick: () => unbanIp(it.value) }, "Remover (unban)")));
-    menu.append(trigger, ul);
+    // Menu de ações por linha (posição fixed — abre para fora, não recorta na tabela).
+    const menu = rowActionMenu([
+      { label: "Alterar duração", onClick: () => openDurationModal(it.value) },
+      { label: "Tornar permanente", onClick: () => makePermanent(it.value) },
+      { label: "Remover (unban)", className: "text-error", onClick: () => unbanIp(it.value) },
+    ]);
 
     const badges = el("span", { class: "flex items-center gap-1" });
     badges.append(el("span", { class: `badge ${ub.cls} badge-sm` }, ub.text));
