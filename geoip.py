@@ -38,11 +38,15 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def lookup(ip: str) -> dict[str, Any]:
+async def lookup(ip: str, cached_only: bool = False) -> dict[str, Any]:
     """Geolocaliza `ip`, usando cache quando possível.
 
     Retorna um dict com pelo menos: ip, country_name, country_code, isp,
     cached (bool) e — em caso de erro — a chave `error`.
+
+    Com cached_only=True, só responde do cache (base): se não houver, devolve
+    {ip, cached: False, not_cached: True} SEM chamar a API externa (não gasta
+    cota) — usado para "mostrar direto se já estiver na base".
 
     Levanta ValueError se o IP for inválido.
     """
@@ -54,6 +58,9 @@ async def lookup(ip: str) -> dict[str, Any]:
     cached = db.get_geoip_cache(ip, ttl_days=settings.geoip_cache_ttl_days)
     if cached is not None:
         return cached
+
+    if cached_only:
+        return {"ip": ip, "cached": False, "not_cached": True}
 
     # 2) Consulta a API externa.
     params: dict[str, str] = {"ip": ip, "format": "json"}

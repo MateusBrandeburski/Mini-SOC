@@ -1144,9 +1144,11 @@ function renderGeoipInto(slot, g) {
 }
 
 // Cria um botão de geolocalização + um slot para o resultado (ao lado do IP).
-// A busca é sob demanda: só chama /api/geoip quando clicado. O resultado fica
+// A busca é sob demanda: só chama a API externa quando clicado. O resultado fica
 // em cache no servidor (app.db) e também em cache de sessão (state.geoip).
-function geoipControl(ip) {
+// opts.probeCache: ao criar, consulta SÓ o cache (base) sem gastar a API externa;
+// se já estiver lá, mostra a geoloc direto e esconde o botão (usado no detalhe).
+function geoipControl(ip, opts = {}) {
   const wrap = el("span", { class: "inline-flex items-center gap-1 align-middle" });
   const slot = el("span", { class: "geoip-slot" });
   if (!ip || ip === "—") return wrap;
@@ -1156,16 +1158,20 @@ function geoipControl(ip) {
     title: "Geolocalizar este IP (iplocation.net)",
   }, "🌐");
 
+  // No modo probeCache, ao mostrar o resultado o botão vira redundante: removemos
+  // do DOM (à prova de cascata CSS — só a classe `hidden` não vence o `.btn` do DaisyUI).
+  const showResult = (g) => { renderGeoipInto(slot, g); if (opts.probeCache) btn.remove(); };
+
   async function run() {
     // Cache de sessão: evita rechamar a API dentro da mesma sessão.
-    if (state.geoip[ip]) { renderGeoipInto(slot, state.geoip[ip]); return; }
+    if (state.geoip[ip]) { showResult(state.geoip[ip]); return; }
     btn.disabled = true;
     slot.innerHTML = "";
     slot.append(el("span", { class: "loading loading-spinner loading-xs align-middle" }));
     try {
       const g = await apiFetch("/api/geoip?ip=" + encodeURIComponent(ip));
       state.geoip[ip] = g;
-      renderGeoipInto(slot, g);
+      showResult(g);
     } catch (e) {
       renderGeoipInto(slot, { error: e.message });
     } finally {
@@ -1175,8 +1181,20 @@ function geoipControl(ip) {
   btn.addEventListener("click", run);
   wrap.append(btn, slot);
 
-  // Se já buscamos este IP nesta sessão, mostra direto (sem novo clique).
-  if (state.geoip[ip]) renderGeoipInto(slot, state.geoip[ip]);
+  if (state.geoip[ip]) {
+    // Já buscado nesta sessão: mostra direto.
+    showResult(state.geoip[ip]);
+  } else if (opts.probeCache) {
+    // Consulta só o cache (base): se já estiver lá, mostra direto (sem gastar cota).
+    apiFetch("/api/geoip?cached_only=1&ip=" + encodeURIComponent(ip))
+      .then((g) => {
+        if (g && !g.not_cached && (g.country_code || g.country_name || g.isp)) {
+          state.geoip[ip] = g;
+          showResult(g);
+        }
+      })
+      .catch(() => {});
+  }
   return wrap;
 }
 
@@ -2459,11 +2477,12 @@ function openLogDetail(it) {
     ));
   };
 
-  // IP (+ CF badge + geoloc sob demanda).
+  // IP (+ CF badge).
   const ipVal = el("div", { class: "flex items-center gap-2 flex-wrap mono" }, it.ip ?? "—");
   if (it.cf) ipVal.append(el("span", { class: "badge badge-warning badge-xs", title: "IP da borda Cloudflare" }, "CF"));
-  ipVal.append(geoipControl(it.ip));
   row("IP", ipVal);
+  // Geolocalização: mostra direto se o IP já está na base; senão, botão 🌐 p/ buscar.
+  row("Geolocalização", geoipControl(it.ip, { probeCache: true }));
 
   const via = it.access_via || it.site || "—";
   const viaDirect = via === "IP direto";

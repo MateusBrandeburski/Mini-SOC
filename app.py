@@ -198,10 +198,12 @@ async def api_origins(user: str = Depends(auth.require_auth)):
 
 
 @app.get("/api/geoip")
-async def api_geoip(ip: str = Query(...), user: str = Depends(auth.require_auth)):
-    """Geolocaliza um IP sob demanda (botão na tabela). Usa cache no app.db."""
+async def api_geoip(ip: str = Query(...), cached_only: bool = Query(False),
+                    user: str = Depends(auth.require_auth)):
+    """Geolocaliza um IP. Usa cache no app.db. Com cached_only=1, só responde do
+    cache (sem chamar a API externa) — para mostrar direto o que já está na base."""
     try:
-        return await geoip.lookup(ip)
+        return await geoip.lookup(ip, cached_only=cached_only)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
