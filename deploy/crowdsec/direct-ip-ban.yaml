@@ -1,0 +1,18 @@
+type: trigger
+name: custom/direct-ip-access
+description: "Acesso direto pelo IP (scanner) - ban imediato"
+# Bane na hora quem toca o servidor pelo IP cru / host inválido (linhas do
+# 000-default-drop, rotuladas com direct_ip=true). EXCEÇÃO: fetches benignos
+# comuns (robots.txt, favicon.ico) sozinhos NÃO banem — crawlers/monitores
+# legítimos (Googlebot etc.) às vezes tocam o IP; um scanner real sonda outros
+# paths, que disparam o ban no primeiro deles.
+filter: |
+  evt.Line.Labels.direct_ip == 'true' and
+  evt.Parsed.request != '/robots.txt' and
+  evt.Parsed.request != '/favicon.ico'
+groupby: "evt.Meta.source_ip"
+blackhole: 10s
+labels:
+  remediation: true
+  type: scan
+  service: http

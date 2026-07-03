@@ -25,8 +25,11 @@ no LXC de produção. Este diretório guarda cópias versionadas para reprodutib
   (leaky, `capacity: 4` → só bane após 4 arquivos distintos).
 - `crowdsec-nginx-bouncer.conf.example` — **config de referência do bouncer L7**
   (sem a API key). Ver seção abaixo.
-- `reference-direct-ip-ban.yaml` — cópia de referência do cenário que bane acesso
-  direto pelo IP (já existente em prod).
+- `direct-ip-ban.yaml` — cenário que bane **na hora** quem acessa pelo IP cru /
+  host inválido (linhas do `000-default-drop`, `direct_ip=true`). **Exceção:**
+  `robots.txt` e `favicon.ico` sozinhos NÃO banem (crawlers/monitores legítimos
+  tocam o IP; scanner real sonda outros paths e cai no ban no primeiro deles).
+  Instala em `/etc/crowdsec/scenarios/direct-ip-ban.yaml` (`crowdsec -t && systemctl reload crowdsec`).
 - `reference-profiles.yaml` — cópia de referência do `profiles.yaml` (duração dos bans).
 
 ## Bouncer no nginx (L7) — bloqueia banido que vem via Cloudflare
