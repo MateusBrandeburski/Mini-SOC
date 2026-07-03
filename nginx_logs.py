@@ -243,6 +243,11 @@ def _to_int(value: str | None) -> int | None:
         return None
 
 
+# Comprimento máximo do method exibido (métodos HTTP reais cabem folgado; o
+# resto é lixo de scans/requests malformadas e é truncado).
+_METHOD_MAX = 10
+
+
 def _split_request(request: str | None) -> tuple[str | None, str | None, str | None]:
     """Quebra a request line do nginx em (method, path, proto), tolerante a lixo.
 
@@ -251,7 +256,10 @@ def _split_request(request: str | None) -> tuple[str | None, str | None, str | N
       '\\x05\\x01\\x00'      (handshake SOCKS5) -> só o "método", sem path/proto
       'GET /favicon.ico'    (sem versão)        -> method + path, sem proto
       ''                    (request vazia)     -> tudo None
-    Nunca levanta exceção; devolve None nos campos ausentes.
+    Nunca levanta exceção; devolve None nos campos ausentes. O method é
+    truncado em `_METHOD_MAX` chars: um método HTTP real tem no máximo ~7-8
+    letras, então lixo maior (ex.: request binária inteira) é cortado para não
+    poluir a UI.
     """
     if request is None:
         return None, None, None
@@ -259,13 +267,14 @@ def _split_request(request: str | None) -> tuple[str | None, str | None, str | N
     if not req:
         return None, None, None
     parts = req.split(" ")
+    method = parts[0][:_METHOD_MAX]
     if len(parts) == 1:
         # Só um token: tratamos como "método"/request bruta (ex.: lixo binário).
-        return parts[0], None, None
+        return method, None, None
     if len(parts) == 2:
-        return parts[0], parts[1], None
+        return method, parts[1], None
     # 3+ tokens: method, proto é o último, path é tudo no meio (pode ter espaço).
-    return parts[0], " ".join(parts[1:-1]), parts[-1]
+    return method, " ".join(parts[1:-1]), parts[-1]
 
 
 def _parse_time(raw: str | None) -> str | None:
