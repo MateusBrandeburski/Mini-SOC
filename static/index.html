@@ -73,13 +73,6 @@
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .tnum { font-variant-numeric: tabular-nums; }
 
-  /* Área de tail ao vivo. */
-  #liveArea {
-    max-height: 22rem; overflow-y: auto; overflow-x: auto;
-    font-size: 0.78rem; line-height: 1.35rem;
-  }
-  #liveArea .live-line { white-space: pre; padding: 0.05rem 0; }
-
   /* Detalhe expansível de auditoria/logs. */
   .expand-cell pre {
     white-space: pre-wrap; word-break: break-word; margin: 0;
@@ -95,6 +88,16 @@
   /* Rota/UA truncados nas tabelas. */
   .truncate-cell { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .truncate-ua   { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* IP truncado: IPv6 longo fica do tamanho de um IPv4 na tabela (resto no title). */
+  .ip-trunc { display: inline-block; max-width: 15ch; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+
+  /* Tabelas "top" das estatísticas: layout fixo p/ nunca ter scroll lateral —
+     a 1ª coluna trunca no espaço disponível; a 2ª (contagem) tem largura fixa. */
+  table.stats-top { table-layout: fixed; width: 100%; }
+  table.stats-top td:first-child { max-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
 
   /* Estado de carregamento leve. */
   .is-loading { opacity: .5; pointer-events: none; }
@@ -382,10 +385,6 @@
             </select>
           </label>
           <div class="flex items-center gap-2">
-            <label class="label cursor-pointer gap-2">
-              <input id="liveToggle" type="checkbox" class="toggle toggle-success" />
-              <span class="label-text text-xs">Tail ao vivo</span>
-            </label>
             <button id="btnBanGlobalLogs" class="btn btn-sm btn-error">Banir IP</button>
           </div>
         </div>
@@ -430,22 +429,6 @@
               <option value="20000">20.000</option>
             </select>
           </label>
-        </div>
-      </div>
-    </div>
-
-    <!-- Área de tail ao vivo -->
-    <div id="liveWrap" class="card bg-base-200 shadow hidden">
-      <div class="card-body p-4">
-        <div class="flex items-center justify-between">
-          <h2 class="card-title text-base">Tail ao vivo</h2>
-          <div class="flex items-center gap-2">
-            <span id="liveStatus" class="badge badge-ghost badge-sm">parado</span>
-            <button id="liveClear" class="btn btn-xs btn-ghost">Limpar</button>
-          </div>
-        </div>
-        <div id="liveArea" class="mono bg-base-300 rounded-box p-2 mt-2">
-          <div class="opacity-50 live-line">Aguardando linhas…</div>
         </div>
       </div>
     </div>
@@ -532,19 +515,19 @@
         <div class="card bg-base-200 shadow">
           <div class="card-body p-4">
             <h2 class="card-title text-base">Top IPs</h2>
-            <div class="table-scroll"><table class="table table-sm"><tbody id="logTopIps"></tbody></table></div>
+            <div class="table-scroll"><table class="table table-sm stats-top"><tbody id="logTopIps"></tbody></table></div>
           </div>
         </div>
         <div class="card bg-base-200 shadow">
           <div class="card-body p-4">
             <h2 class="card-title text-base">Top rotas</h2>
-            <div class="table-scroll"><table class="table table-sm"><tbody id="logTopPaths"></tbody></table></div>
+            <div class="table-scroll"><table class="table table-sm stats-top"><tbody id="logTopPaths"></tbody></table></div>
           </div>
         </div>
         <div class="card bg-base-200 shadow">
           <div class="card-body p-4">
             <h2 class="card-title text-base">Top user-agents</h2>
-            <div class="table-scroll"><table class="table table-sm"><tbody id="logTopUas"></tbody></table></div>
+            <div class="table-scroll"><table class="table table-sm stats-top"><tbody id="logTopUas"></tbody></table></div>
           </div>
         </div>
       </div>
@@ -1025,7 +1008,6 @@ const state = {
   decisions: { page: 1, pageSize: 50, total: 0 },
   audit: { page: 1, pageSize: 50, total: 0 },
   logs: { page: 1, pageSize: 100, total: 0, file: "" },
-  live: { es: null, on: false },
   banContext: null,           // callback pós-ban (para refresh contextual)
   loginResolvers: [],         // filas de espera enquanto o login está aberto
   loginOpen: false,
@@ -1131,6 +1113,13 @@ const ORIGIN_LABELS = {
 function originLabel(origin) {
   if (origin == null || origin === "") return "—";
   return ORIGIN_LABELS[origin] || origin;
+}
+
+// IP como <span> truncado: um IPv6 longo fica do tamanho de um IPv4 na tabela;
+// o valor completo aparece no tooltip (title). IPv4 curto não trunca.
+function ipText(ip) {
+  const v = (ip == null || ip === "") ? "—" : String(ip);
+  return el("span", { class: "ip-trunc mono", title: v }, v);
 }
 
 // Renderiza o resultado da geolocalização dentro de `slot` (bandeira, país, ISP).
@@ -1867,7 +1856,7 @@ function renderDecisions(items) {
     const badges = el("span", { class: "flex items-center gap-1" });
     badges.append(el("span", { class: `badge ${ub.cls} badge-sm` }, ub.text));
 
-    const decIpCell = el("td", { class: "mono text-xs whitespace-nowrap" }, it.value ?? "—");
+    const decIpCell = el("td", { class: "text-xs whitespace-nowrap" }, ipText(it.value));
     decIpCell.append(" ", geoipControl(it.value));
 
     body.append(el("tr", {},
@@ -1975,7 +1964,7 @@ async function loadWhitelist() {
         onclick: () => removeWhitelistIp(it.value),
       }, "Remover");
       body.append(el("tr", {},
-        el("td", { class: "mono text-xs whitespace-nowrap" }, it.value ?? "—"),
+        el("td", { class: "whitespace-nowrap" }, ipText(it.value)),
         el("td", { class: "text-xs" }, it.description || "—"),
         el("td", { class: "text-xs whitespace-nowrap" }, it.created_at ? fmtLocal(it.created_at) : "—"),
         el("td", { class: "text-right" }, rm),
@@ -2166,7 +2155,7 @@ async function loadAlertHistory() {
       const flag = it.country ? countryCodeToFlag(it.country) + " " + esc(it.country) : "—";
       body.append(el("tr", {},
         el("td", { class: "text-xs whitespace-nowrap" }, fmtLocal(it.ts)),
-        el("td", { class: "mono text-xs" }, it.ip ?? "—"),
+        el("td", {}, ipText(it.ip)),
         el("td", { class: "whitespace-nowrap" }, flag),
         el("td", { class: "mono text-xs" }, it.asn ?? "—"),
         el("td", { class: "text-xs" }, it.scenario ?? "—"),
@@ -2213,7 +2202,9 @@ function openBanModal(prefillIp = "", onDone = null) {
   $("#banType").dispatchEvent(new Event("change"));
   state.banContext = onDone;
   $("#banModal").showModal();
-  setTimeout(() => (prefillIp ? $("#banDurPreset") : $("#banValue")).focus(), 50);
+  // Foca sempre o campo de IP (um <input> normal). NÃO focar o select de duração:
+  // ele é um dropdown estilizado que abre no :focus-within, aparecendo "já aberto".
+  setTimeout(() => $("#banValue").focus(), 50);
   if (prefillIp) refreshBanWhitelistWarning(prefillIp);
 }
 
@@ -2372,7 +2363,6 @@ function setLogFile(name, origin) {
       s.dispatchEvent(new CustomEvent("options:changed")); // re-sincroniza o dropdown estilizado
     }
   }
-  if (state.live.on) startLive();       // reconecta o tail no novo arquivo
   loadLogs();
   loadLogStats();                        // stats dependem do arquivo; mantém a outra aba pronta
 }
@@ -2517,18 +2507,19 @@ function renderLogs(items) {
     const banned = it.banned
       ? el("span", { class: "badge badge-error badge-sm", title: "IP atualmente banido" }, "banido")
       : "";
-    // Ações: Detalhe (modal com tudo) + Banir; e Desbanir 1-clique se já estiver banido.
+    // Ações: Detalhe + (Desbanir se já banido | Banir se não). Nunca os dois.
     const detBtn = el("button", { class: "btn btn-xs btn-ghost", title: "Ver detalhes da requisição", onclick: () => openLogDetail(it) }, "Detalhe");
-    const banBtn = el("button", { class: "btn btn-xs btn-error btn-outline", onclick: () => openBanModal(it.ip, () => loadLogs()) }, "Banir");
     const actions = el("td", { class: "text-right whitespace-nowrap" });
-    actions.append(detBtn, " ", banBtn);
+    actions.append(detBtn, " ");
     if (it.banned) {
-      actions.append(" ", el("button", { class: "btn btn-xs btn-outline btn-success", title: "Desbanir este IP", onclick: () => quickUnban(it.ip) }, "Desbanir"));
+      actions.append(el("button", { class: "btn btn-xs btn-outline btn-success", title: "Desbanir este IP", onclick: () => quickUnban(it.ip) }, "Desbanir"));
+    } else {
+      actions.append(el("button", { class: "btn btn-xs btn-error btn-outline", title: "Banir este IP", onclick: () => openBanModal(it.ip, () => loadLogs()) }, "Banir"));
     }
 
     // Célula do IP: se for da Cloudflare, adiciona badge "CF" com aviso de que
     // o IP registrado é da borda da CF (o real depende do log_format do vhost).
-    const ipCell = el("td", { class: "mono text-xs whitespace-nowrap" }, it.ip ?? "—");
+    const ipCell = el("td", { class: "text-xs whitespace-nowrap" }, ipText(it.ip));
     if (it.cf) {
       ipCell.append(" ");
       ipCell.append(el("span", {
@@ -2650,85 +2641,6 @@ function renderLogTopTable(sel, rows, key, mono) {
     cell.append(bar);
     body.append(el("tr", {}, cell, el("td", { class: "text-right tnum w-14 text-xs" }, fmtInt(r.count))));
   }
-}
-
-/* ---- Tail ao vivo (SSE) ---- */
-function toggleLive(on) {
-  state.live.on = on;
-  $("#liveWrap").classList.toggle("hidden", !on);
-  if (on) startLive(); else stopLive();
-}
-
-function startLive() {
-  stopLive();
-  const file = state.logs.file || $("#logFile").value;
-  if (!file) { toast("Selecione um arquivo primeiro.", "warning"); $("#liveToggle").checked = false; toggleLive(false); return; }
-  const url = "/api/logs/stream?file=" + encodeURIComponent(file);
-  let es;
-  try {
-    es = new EventSource(url);
-  } catch (e) {
-    liveFallback("Navegador não suporta EventSource.");
-    return;
-  }
-  state.live.es = es;
-  setLiveStatus("conectando…", "badge-warning");
-
-  es.onopen = () => setLiveStatus("ao vivo", "badge-success");
-  es.onmessage = (ev) => {
-    try {
-      const item = JSON.parse(ev.data);
-      prependLive(item);
-    } catch (_) { /* ignora payload inválido */ }
-  };
-  es.addEventListener("error", (ev) => {
-    // Pode ser erro de servidor (evento nomeado) ou queda de conexão.
-    if (ev && ev.data) {
-      try { const j = JSON.parse(ev.data); liveFallback(j.error || "erro no stream"); return; } catch (_) {}
-    }
-    if (es.readyState === EventSource.CLOSED) {
-      liveFallback("Conexão SSE encerrada.");
-    } else {
-      setLiveStatus("reconectando…", "badge-warning");
-    }
-  });
-}
-
-function stopLive() {
-  if (state.live.es) { try { state.live.es.close(); } catch (_) {} state.live.es = null; }
-  setLiveStatus("parado", "badge-ghost");
-}
-
-function liveFallback(msg) {
-  stopLive();
-  setLiveStatus("indisponível", "badge-error");
-  const area = $("#liveArea");
-  area.prepend(el("div", { class: "live-line text-warning" },
-    "⚠ Tail ao vivo indisponível: " + esc(msg) + " — use 'Aplicar' para recarregar manualmente."));
-}
-
-function setLiveStatus(text, cls) {
-  const b = $("#liveStatus");
-  b.className = "badge badge-sm " + cls;
-  b.textContent = text;
-}
-
-function prependLive(item) {
-  const area = $("#liveArea");
-  if (area.firstElementChild && area.firstElementChild.classList.contains("opacity-50")) {
-    area.firstElementChild.remove();
-  }
-  let line;
-  if (item && item.matched) {
-    const status = item.status ?? "";
-    line = `${item.ip || "-"}  ${item.time ? fmtLocal(item.time) : (item.time_raw || "-")}  ${item.method || "-"} ${item.path || "-"}  [${status}]  ${item.ua || ""}`;
-  } else {
-    line = (item && item.raw) ? item.raw : JSON.stringify(item);
-  }
-  const div = el("div", { class: "live-line" }, line);
-  area.prepend(div);
-  // Limita o histórico visível para não crescer indefinidamente.
-  while (area.childElementCount > 500) area.lastElementChild.remove();
 }
 
 /* ================================================================ PAGINAÇÃO */
@@ -2863,8 +2775,6 @@ function wireEvents() {
   $("#lgPrev").addEventListener("click", () => pagerStep(state.logs, -1, loadLogs));
   $("#lgNext").addEventListener("click", () => pagerStep(state.logs, +1, loadLogs));
   $("#lgStatsRefresh").addEventListener("click", loadLogStats);
-  $("#liveToggle").addEventListener("change", (e) => toggleLive(e.target.checked));
-  $("#liveClear").addEventListener("click", () => { $("#liveArea").innerHTML = ""; });
   $("#btnBanGlobalLogs").addEventListener("click", () => openBanModal("", () => loadLogs()));
 }
 
