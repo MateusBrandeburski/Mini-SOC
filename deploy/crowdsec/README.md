@@ -30,7 +30,33 @@ no LXC de produção. Este diretório guarda cópias versionadas para reprodutib
   `robots.txt` e `favicon.ico` sozinhos NÃO banem (crawlers/monitores legítimos
   tocam o IP; scanner real sonda outros paths e cai no ban no primeiro deles).
   Instala em `/etc/crowdsec/scenarios/direct-ip-ban.yaml` (`crowdsec -t && systemctl reload crowdsec`).
+- `waf-ban.html` — **tela de bloqueio (403) customizada** servida pelo nginx-bouncer.
+  Título "Bloqueado pelo WAF", contato do admin, data (via JS) + "MINI SOC — BOTS
+  NÃO PASSARÃO!", sem marca do CrowdSec. Instala em
+  `/var/lib/crowdsec/lua/templates/ban.html` + `nginx -t && systemctl reload nginx`.
 - `reference-profiles.yaml` — cópia de referência do `profiles.yaml` (duração dos bans).
+
+## Cenários desativados (menos falso-positivo em uso normal)
+
+Cenários **comportamentais** que banavam usuário legítimo (ex.: SPA que dispara
+POSTs de login retornando 401, muitos requests dinâmicos, alguns 404) foram
+**desativados** — bans graves são feitos na mão. Desativados via
+`cscli scenarios remove <nome> --force` + `systemctl reload crowdsec`:
+
+- `crowdsecurity/http-generic-bf` — **atenção:** este arquivo do hub
+  (`hub/scenarios/crowdsecurity/http-generic-bf.yaml`) foi modificado e também
+  define `LePresidente/http-generic-401-bf` e `LePresidente/http-generic-403-bf`
+  (leaky, capacity 5 / 10s → 5 POST 401/403 em ~50s = ban). Remover o
+  `http-generic-bf` desativa os **três**.
+- `crowdsecurity/http-crawl-non_statics` — crawling de recursos não-estáticos.
+- `crowdsecurity/http-probing` — probing genérico de 404.
+
+**Mantidos ativos** (ataques reais): todos os CVE/exploits, `custom/sensitive-files-ban`,
+`custom/direct-ip-access`, `http-sqli/xss/path-traversal/cve/admin-interface-probing`,
+`http-backdoors-attempts`, `http-bad-user-agent`, w00tw00t, sshd + bans manuais.
+
+Re-ativar (se quiser): `cscli scenarios install crowdsecurity/http-generic-bf` etc.
++ `systemctl reload crowdsec`.
 
 ## Bouncer no nginx (L7) — bloqueia banido que vem via Cloudflare
 

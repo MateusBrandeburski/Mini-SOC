@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bloqueado pelo WAF</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(1200px 600px at 50% -10%, #241a14 0%, #0f1115 60%);
+      color: #e8e6e1; text-align: center; padding: 24px;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .card { max-width: 680px; }
+    .shield { width: 84px; height: 84px; margin: 0 auto 24px; color: #F06018; }
+    h1 { font-size: clamp(2.2rem, 7vw, 4rem); font-weight: 800; margin: 0 0 18px; letter-spacing: -0.02em; line-height: 1.05; }
+    .sub { font-size: clamp(1.05rem, 3.2vw, 1.4rem); opacity: .85; margin: 0 0 32px; }
+    .meta { font-size: .78rem; opacity: .6; line-height: 1.8; }
+    .brand { font-weight: 700; color: #F8A810; letter-spacing: .08em; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <svg class="shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 3l7 4v5c0 4.6-3.1 7.6-7 9-3.9-1.4-7-4.4-7-9V7z" />
+      <line x1="12" y1="8" x2="12" y2="13" />
+      <line x1="12" y1="16.5" x2="12.01" y2="16.5" />
+    </svg>
+    <h1>Bloqueado pelo WAF</h1>
+    <p class="sub">Entre em contato com o administrador do domínio</p>
+    <div class="meta">
+      <div id="dt"></div>
+      <div class="brand">MINI SOC — BOTS NÃO PASSARÃO!</div>
+    </div>
+  </div>
+  <script>
+    try {
+      document.getElementById('dt').textContent = 'Bloqueado em ' + new Date().toLocaleString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    } catch (e) {}
+  </script>
+</body>
+</html>
