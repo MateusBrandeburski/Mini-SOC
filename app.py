@@ -64,8 +64,12 @@ def _actor(request: Request) -> str:
 
 
 def _cscli_response(request: Request, *, action: str, target: str,
-                    detail: dict[str, Any] | None, result: crowdsec.CscliResult) -> JSONResponse:
-    """Registra na auditoria e devolve JSON padronizado para ações cscli."""
+                    detail: dict[str, Any] | None, result: crowdsec.CscliResult,
+                    extra: dict[str, Any] | None = None) -> JSONResponse:
+    """Registra na auditoria e devolve JSON padronizado para ações cscli.
+
+    `extra` é mesclado no corpo da resposta (ex.: sinalizar unban_ok ao front).
+    """
     db.add_audit(
         actor=_actor(request),
         action=action,
@@ -78,17 +82,17 @@ def _cscli_response(request: Request, *, action: str, target: str,
         success=result.ok,
     )
     status = 200 if result.ok else 400
-    return JSONResponse(
-        {
-            "ok": result.ok,
-            "action": action,
-            "target": target,
-            "exit_code": result.exit_code,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        },
-        status_code=status,
-    )
+    body = {
+        "ok": result.ok,
+        "action": action,
+        "target": target,
+        "exit_code": result.exit_code,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+    if extra:
+        body.update(extra)
+    return JSONResponse(body, status_code=status)
 
 
 # ============================================================================ AUTH
@@ -126,6 +130,7 @@ def _serve_index() -> FileResponse | JSONResponse:
 @app.get("/logs")
 @app.get("/alertas")
 @app.get("/auditoria")
+@app.get("/whitelist")
 async def index(request: Request):
     return _serve_index()
 
@@ -221,18 +226,19 @@ async def api_ban(request: Request, user: str = Depends(auth.require_auth)):
     duration = (body.get("duration") or "4h").strip()
     reason = (body.get("reason") or "painel: banimento manual").strip()
     type_ = (body.get("type") or "ban").strip()
+    bypass = bool(body.get("bypass_allowlist"))
     # Validação antes de tocar no cscli.
     try:
         crowdsec.validate_ip_or_cidr(value)
         crowdsec.validate_duration(duration)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    result = crowdsec.add_decision(value=value, duration=duration, reason=reason, type_=type_)
+    result = crowdsec.add_decision(value=value, duration=duration, reason=reason, type_=type_, bypass_allowlist=bypass)
     return _cscli_response(
         request,
         action="add",
         target=value,
-        detail={"duration": duration, "reason": reason, "type": type_},
+        detail={"duration": duration, "reason": reason, "type": type_, "bypass_allowlist": bypass},
         result=result,
     )
 
@@ -274,6 +280,64 @@ async def api_change_duration(request: Request, user: str = Depends(auth.require
         detail={"new": new_duration, "reason": reason},
         result=result,
     )
+
+
+# ============================================================================ API (whitelist/allowlist)
+@app.get("/api/whitelist")
+async def api_whitelist_list(user: str = Depends(auth.require_auth)):
+    """Itens da whitelist (allowlist do painel). Somente leitura."""
+    return {"items": crowdsec.allowlist_list()}
+
+
+@app.get("/api/whitelist/check")
+async def api_whitelist_check(value: str = Query(...), user: str = Depends(auth.require_auth)):
+    """Verifica se um IP/CIDR está na whitelist (allowlist) — usado pelo modal de banir."""
+    try:
+        crowdsec.validate_ip_or_cidr(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return crowdsec.allowlist_check(value)
+
+
+@app.post("/api/whitelist")
+async def api_whitelist_add(request: Request, user: str = Depends(auth.require_auth)):
+    """Adiciona IP/CIDR à whitelist e, por padrão, remove bans ativos dele (unban).
+
+    'whitelist = nunca bloqueado' passa a valer já — não só para ataques futuros.
+    """
+    body = await request.json()
+    value = (body.get("value") or "").strip()
+    comment = (body.get("comment") or "painel: whitelist manual").strip()
+    try:
+        crowdsec.validate_ip_or_cidr(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    add_res = crowdsec.allowlist_add(value, comment)
+    unban = None
+    if add_res.ok:
+        # Remove decisões ativas do IP (allowlist só barra futuras; isto limpa o
+        # presente). contained=True: para um CIDR, também remove bans por-IP dentro da faixa.
+        unban = crowdsec.delete_decision_by_ip(value, contained=True)
+    return _cscli_response(
+        request,
+        action="whitelist_add",
+        target=value,
+        detail={"comment": comment, "unban_ok": bool(unban and unban.ok)},
+        result=add_res,
+        extra={"unban_ok": (bool(unban.ok) if unban else None),
+               "unban_stderr": (unban.stderr.strip() if unban else "")},
+    )
+
+
+@app.delete("/api/whitelist")
+async def api_whitelist_remove(request: Request, value: str = Query(...), user: str = Depends(auth.require_auth)):
+    """Remove um IP/CIDR da whitelist (allowlist)."""
+    try:
+        crowdsec.validate_ip_or_cidr(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    result = crowdsec.allowlist_remove(value)
+    return _cscli_response(request, action="whitelist_remove", target=value, detail=None, result=result)
 
 
 # ============================================================================ API (alertas)

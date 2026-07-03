@@ -20,6 +20,24 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
 <link rel="apple-touch-icon" href="/static/favicon-64.png" />
 
+<!-- Anti-FOUC: o Tailwind é aplicado por JS (runtime) e as tags vêm depois do
+     conteúdo, então ao dar F5 o navegador chega a pintar o DOM sem estilo (logo
+     e ícones gigantes). Escondemos o conteúdo atrás de um splash até o app montar
+     (init() adiciona .app-ready ao <html>); um timeout de segurança garante que
+     a UI nunca fica presa mesmo se o JS falhar. Esta regra precisa vir ANTES do
+     conteúdo para valer já na primeira pintura. -->
+<style>
+  @keyframes appspin { to { transform: rotate(360deg); } }
+  #appSplash { position: fixed; inset: 0; z-index: 9999; display: flex;
+    align-items: center; justify-content: center; background: #ffffff; }
+  #appSplash .spin { width: 42px; height: 42px; border: 4px solid #e6e0da;
+    border-top-color: #F06018; border-radius: 50%; animation: appspin .8s linear infinite; }
+  html:not(.app-ready) { overflow: hidden; }
+  html:not(.app-ready) body > *:not(#appSplash) { visibility: hidden !important; }
+  html.app-ready #appSplash { opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity .18s ease-out; }
+</style>
+
 <style>
   /* Paleta de gráficos calibrada para o tema claro DaisyUI "cupcake"
      (superfície creme, cards em base-200 ≈ #efeae6).
@@ -105,6 +123,9 @@
 
 <!-- Navbar fixo. A barra/borda vão de ponta a ponta; o CONTEÚDO interno fica no
      mesmo container (max-w-[1400px]) das abas e do main, para alinhar com eles. -->
+<!-- Splash de carregamento (coberto/removido por .app-ready quando o app monta). -->
+<div id="appSplash"><div class="spin"></div></div>
+
 <header class="bg-base-100/90 backdrop-blur sticky top-0 z-50 border-b border-base-300">
   <div class="navbar min-h-16 gap-2 px-2 sm:px-4 max-w-[1400px] mx-auto">
     <div class="flex-1 flex items-center gap-3 min-w-0">
@@ -142,6 +163,12 @@
             <a data-nav="auditoria" href="/auditoria">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
               Auditoria
+            </a>
+          </li>
+          <li>
+            <a data-nav="whitelist" href="/whitelist">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7z"/></svg>
+              Whitelist
             </a>
           </li>
         </ul>
@@ -298,9 +325,11 @@
                 <input id="decActiveOnly" type="checkbox" class="checkbox checkbox-sm" checked />
                 <span class="label-text text-xs">só ativos</span>
               </label>
-              <button id="decApply" class="btn btn-sm btn-primary">Aplicar</button>
             </div>
-            <button id="btnBanGlobal" class="btn btn-sm btn-error">Banir IP</button>
+            <div class="flex items-center gap-2">
+              <button id="btnUnbanGlobal" class="btn btn-sm btn-outline btn-success">Desbanir IP</button>
+              <button id="btnBanGlobal" class="btn btn-sm btn-error">Banir IP</button>
+            </div>
           </div>
 
           <div class="table-scroll">
@@ -400,7 +429,6 @@
               <option value="20000">20.000</option>
             </select>
           </label>
-          <button id="lgApply" class="btn btn-sm btn-primary">Aplicar</button>
         </div>
       </div>
     </div>
@@ -428,12 +456,12 @@
           <table class="table table-sm table-zebra">
             <thead>
               <tr>
-                <th>IP</th><th>Acesso / Domínio</th><th>Hora</th><th>Método</th><th>Rota</th><th>Status</th>
-                <th>Tamanho</th><th>UA</th><th></th><th>Ações</th>
+                <th>IP</th><th>Hora</th><th>Método</th><th>Rota</th><th>Status</th>
+                <th>Tamanho</th><th></th><th class="text-right">Ações</th>
               </tr>
             </thead>
             <tbody id="lgBody">
-              <tr><td colspan="10" class="text-center opacity-60 py-6">selecione um arquivo…</td></tr>
+              <tr><td colspan="8" class="text-center opacity-60 py-6">selecione um arquivo…</td></tr>
             </tbody>
           </table>
         </div>
@@ -632,6 +660,56 @@
       </div>
     </div>
   </section>
+
+  <!-- ================================================================ PÁGINA WHITELIST -->
+  <!-- Página própria (path /whitelist). IPs/CIDRs aqui NUNCA são bloqueados pelo
+       CrowdSec (allowlist via cscli). Acessível pelo menu de engrenagem. -->
+  <section data-panel="whitelist" class="hidden space-y-4">
+    <h1 class="text-xl font-bold flex items-center gap-2">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7z"/></svg>
+      Whitelist
+    </h1>
+
+    <div class="card bg-base-200 shadow">
+      <div class="card-body p-4 gap-3">
+        <h2 class="card-title text-base">Adicionar à whitelist</h2>
+        <p class="text-sm opacity-70">
+          IPs/CIDRs na whitelist <b>nunca são bloqueados</b> pelo CrowdSec. Ao adicionar,
+          qualquer ban ativo daquele IP também é removido (desbanido na hora).
+        </p>
+        <div class="flex flex-wrap items-end gap-2">
+          <label class="form-control">
+            <span class="label-text text-xs pb-1">IP ou CIDR</span>
+            <input id="wlValue" type="text" placeholder="203.0.113.5 ou 203.0.113.0/24" class="input input-sm input-bordered mono w-64 max-w-full" />
+          </label>
+          <label class="form-control flex-1 min-w-[12rem]">
+            <span class="label-text text-xs pb-1">Comentário (opcional)</span>
+            <input id="wlComment" type="text" placeholder="ex.: rede do escritório" class="input input-sm input-bordered w-full" />
+          </label>
+          <button id="wlAdd" class="btn btn-sm btn-primary">Adicionar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card bg-base-200 shadow">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="card-title text-base">Itens da whitelist</h2>
+          <button id="wlRefresh" class="btn btn-sm btn-ghost btn-circle" title="Recarregar" aria-label="Recarregar whitelist">↻</button>
+        </div>
+        <div class="table-scroll">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr><th>IP / CIDR</th><th>Comentário</th><th>Adicionado</th><th class="text-right">Ações</th></tr>
+            </thead>
+            <tbody id="wlBody">
+              <tr><td colspan="4" class="text-center opacity-60 py-6">carregando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <!-- ============================================================ MODAL: banir IP -->
@@ -670,6 +748,20 @@
         <span class="label-text text-xs">Motivo</span>
         <input id="banReason" type="text" placeholder="painel: banimento manual" class="input input-sm input-bordered" />
       </label>
+
+      <!-- Aviso: IP está na whitelist. Enquanto estiver, o CrowdSec não aplica o
+           ban. O switch confirma remover da whitelist para o ban valer. -->
+      <div id="banWlWarn" class="alert alert-warning hidden items-start gap-2 py-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div class="flex-1">
+          <div class="font-semibold text-sm">Este IP está na whitelist</div>
+          <div class="text-xs opacity-80">Enquanto estiver na whitelist, o CrowdSec <b>não</b> vai aplicar o ban.</div>
+          <label class="label cursor-pointer justify-start gap-2 mt-1 p-0">
+            <input id="banWlRemove" type="checkbox" class="toggle toggle-warning toggle-sm" />
+            <span class="label-text text-xs">Remover da whitelist e banir</span>
+          </label>
+        </div>
+      </div>
     </div>
     <div class="modal-action">
       <button id="banConfirm" class="btn btn-sm btn-error">Banir</button>
@@ -712,6 +804,44 @@
     <div class="modal-action">
       <button id="durConfirm" class="btn btn-sm btn-primary">Aplicar</button>
       <form method="dialog"><button class="btn btn-sm">Cancelar</button></form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>fechar</button></form>
+</dialog>
+
+<!-- =================================================== MODAL: desbanir IP -->
+<dialog id="unbanModal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Desbanir IP</h3>
+    <p class="text-sm opacity-70 mt-1">Remove TODAS as decisões (bans) de um IP/CIDR via cscli.</p>
+    <div class="space-y-3 mt-3">
+      <label class="form-control">
+        <span class="label-text text-xs">IP ou CIDR</span>
+        <input id="unbanValue" type="text" placeholder="203.0.113.5 ou 203.0.113.0/24" class="input input-bordered input-sm mono" />
+      </label>
+      <p class="text-xs opacity-60">
+        Obs.: se o IP continuar atacando, o CrowdSec pode re-banir. Para nunca mais bloquear,
+        adicione-o à <b>Whitelist</b> (⚙️ → Whitelist).
+      </p>
+    </div>
+    <div class="modal-action">
+      <button id="unbanConfirm" class="btn btn-sm btn-success">Desbanir</button>
+      <form method="dialog"><button class="btn btn-sm">Cancelar</button></form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>fechar</button></form>
+</dialog>
+
+<!-- =================================================== MODAL: detalhe do log -->
+<!-- Mostra TUDO da requisição (UA, acesso/domínio, rota completa, etc.) para
+     manter a tabela de logs compacta, sem scroll lateral. -->
+<dialog id="logDetailModal" class="modal">
+  <div class="modal-box max-w-2xl">
+    <h3 class="font-bold text-lg">Detalhe da requisição</h3>
+    <div id="logDetailBody" class="mt-3 divide-y divide-base-300 text-sm"></div>
+    <div class="modal-action">
+      <button id="logDetailBan" class="btn btn-sm btn-error btn-outline">Banir este IP</button>
+      <form method="dialog"><button class="btn btn-sm">Fechar</button></form>
     </div>
   </div>
   <form method="dialog" class="modal-backdrop"><button>fechar</button></form>
@@ -781,16 +911,18 @@
 
 **Origem** = *quem* decidiu banir o IP. Não confundir: **origem** = quem decidiu · **cenário** = qual regra casou (o motivo) · **tipo** = o que fazer (`ban`/`captcha`).
 
+O painel exibe as origens com nomes amigáveis; entre parênteses está o valor técnico (o que você usa em `ALERT_ORIGINS`).
+
 | Origem | Bloqueios | Ativos | O que é |
 |---|---|---|---|
-| **CAPI** | 24.708 | 24.707 | Blocklist da comunidade CrowdSec (nuvem). IPs que já atacaram outros servidores — chegam pré-banidos, sem terem tocado no seu site. **≈99,6% do total.** |
-| **crowdsec** | 95 | 17 | O agente local no seu servidor detectando ataques reais nos logs do nginx (`direct-ip-access`, `http-bad-user-agent`, CVE-2021-41773...). **É o ataque contra VOCÊ.** |
-| **cscli** | 5 | 4 | Bans manuais — feitos por você no terminal ou pelo botão "Banir IP" do Mini SOC (`scan direto`, `visto no wazuh`, `banimento manual`). |
+| **CrowdSec - CTI** (`CAPI`) | 24.708 | 24.707 | Blocklist da comunidade CrowdSec (nuvem). IPs que já atacaram outros servidores — chegam pré-banidos, sem terem tocado no seu site. **≈99,6% do total.** |
+| **Customizado** (`crowdsec`) | 95 | 17 | O agente local no seu servidor detectando ataques reais nos logs do nginx (`direct-ip-access`, `http-bad-user-agent`, CVE-2021-41773...). **É o ataque contra VOCÊ.** |
+| **Block Manual** (`cscli`) | 5 | 4 | Bans manuais — feitos por você no terminal ou pelo botão "Banir IP" do Mini SOC (`scan direto`, `visto no wazuh`, `banimento manual`). |
 
 ### Como agir com alertas
-- **crowdsec → alertar sempre.** Ataque real contra você; sinal de alto valor, baixo volume.
-- **cscli → opcional.** Você mesmo criou; útil se há mais de um admin.
-- **CAPI → não alertar.** Milhares de bloqueios preventivos por dia = ruído puro.
+- **Customizado (`crowdsec`) → alertar sempre.** Ataque real contra você; sinal de alto valor, baixo volume.
+- **Block Manual (`cscli`) → opcional.** Você mesmo criou; útil se há mais de um admin.
+- **CrowdSec - CTI (`CAPI`) → não alertar.** Milhares de bloqueios preventivos por dia = ruído puro.
 
 Por isso o padrão é `ALERT_ORIGINS=crowdsec,cscli`.
 
@@ -806,9 +938,11 @@ País/ASN vivem na tabela `alerts` (join por `alert_decisions`). Hoje **nenhuma*
 
 <div id="toastStack" class="toast toast-end toast-stack"></div>
 
-<!-- ============================================================ CDNs (zero-build) -->
-<script src="https://cdn.tailwindcss.com"></script>
-<link href="https://cdn.jsdelivr.net/npm/daisyui@4/dist/full.min.css" rel="stylesheet" />
+<!-- ============================================================ Vendor local (zero-build)
+     Assets servidos do próprio projeto (static/vendor) em vez de CDN externo:
+     sem dependência de internet do cliente (painel é LAN) e carregamento rápido. -->
+<script src="/static/vendor/tailwind.js"></script>
+<link href="/static/vendor/daisyui-full.min.css" rel="stylesheet" />
 
 <!-- Paleta da marca: o laranja do logo (#F06018) vira a cor PRIMARY em AMBOS os
      temas, sobrescrevendo os tokens do DaisyUI. Precisa vir DEPOIS do CSS do
@@ -837,8 +971,8 @@ País/ASN vivem na tabela `alerts` (join por `alert_decisions`). Hoje **nenhuma*
     word-break: break-word;
   }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/vendor/marked.min.js"></script>
 
 <script>
 "use strict";
@@ -948,6 +1082,18 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+// Debounce: adia a chamada até parar de digitar por `ms`. Usado nos filtros que
+// aplicam ao digitar (busca de IP, texto livre) para não disparar a cada tecla.
+function debounce(fn, ms = 350) {
+  let t = null;
+  const wrapped = function (...args) {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+  wrapped.cancel = () => clearTimeout(t);
+  return wrapped;
+}
+
 // Escapa texto para inserção segura em HTML (defesa básica de XSS ao montar linhas).
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => (
@@ -962,6 +1108,18 @@ function countryCodeToFlag(cc) {
   if (!/^[A-Z]{2}$/.test(code)) return "🏳️";
   const base = 0x1f1e6;
   return String.fromCodePoint(base + (code.charCodeAt(0) - 65), base + (code.charCodeAt(1) - 65));
+}
+
+// Rótulo amigável para a ORIGEM da decisão. Apenas exibição — o valor real
+// (CAPI/crowdsec/cscli) continua sendo usado em filtros, API e config de alertas.
+const ORIGIN_LABELS = {
+  CAPI: "CrowdSec - CTI",
+  crowdsec: "Customizado",
+  cscli: "Block Manual",
+};
+function originLabel(origin) {
+  if (origin == null || origin === "") return "—";
+  return ORIGIN_LABELS[origin] || origin;
 }
 
 // Renderiza o resultado da geolocalização dentro de `slot` (bandeira, país, ISP).
@@ -1357,6 +1515,7 @@ const VIEWS = {
   logs:      { subs: ["listagem", "estatisticas"], defaultSub: "listagem" },
   alertas:   {},
   auditoria: {},
+  whitelist: {},
 };
 
 // Interpreta o pathname → {view, sub}. Tolera paths curtos (/crowdsec) e inválidos.
@@ -1415,6 +1574,7 @@ function navigate(view, sub = null, { push = true } = {}) {
   else if (view === "logs") { ensureLogsLoaded(); applyLogTab(sub); }
   else if (view === "alertas") { loadAlertConfig(); loadAlertHistory(); }
   else if (view === "auditoria") loadAudit();
+  else if (view === "whitelist") loadWhitelist();
 }
 
 // Aplica a sub-aba do CrowdSec (DOM + carregador). NÃO mexe na URL — isso é
@@ -1462,8 +1622,11 @@ async function loadOrigins() {
     const first = sel.querySelector("option");
     sel.innerHTML = "";
     sel.append(first ? first.cloneNode(true) : el("option", { value: "" }, "Todas"));
-    for (const o of state.origins) sel.append(el("option", { value: o }, o));
+    for (const o of state.origins) sel.append(el("option", { value: o }, originLabel(o)));
     if (current) sel.value = current;
+    // Origens são carregadas via API DEPOIS do init; avisa o dropdown estilizado
+    // (enhanceSelect) para reconstruir a lista — senão só aparece "Todas".
+    sel.dispatchEvent(new CustomEvent("options:changed"));
   }
 }
 
@@ -1642,7 +1805,7 @@ function renderDecisions(items) {
       el("td", { class: "mono text-xs whitespace-nowrap", title: it.as_name || "" }, asn),
       el("td", { class: "text-xs" }, it.scenario ?? "—"),
       el("td", {}, el("span", { class: "badge badge-sm " + (it.type === "ban" ? "badge-error" : "badge-warning") }, it.type ?? "—")),
-      el("td", { class: "text-xs" }, it.origin ?? "—"),
+      el("td", { class: "text-xs" }, originLabel(it.origin)),
       el("td", { class: "text-xs whitespace-nowrap" }, fmtLocal(it.created_at)),
       el("td", { class: "whitespace-nowrap" }, badges),
       el("td", { class: "text-xs opacity-70" }, it.alert_id ?? "—"),
@@ -1659,13 +1822,41 @@ async function unbanIp(value) {
   if (!confirm(
     `Remover (unban) todas as decisões de ${value}?\n\n` +
     "Observação: o unban pode ser temporário se o IP continuar atacando — o " +
-    "CrowdSec pode re-banir. O caminho permanente é a allowlist (TODO)."
+    "CrowdSec pode re-banir. Para nunca mais bloquear, use a Whitelist (⚙️ → Whitelist)."
   )) return;
   try {
     const res = await apiFetch("/api/decisions/by-ip?value=" + encodeURIComponent(value), { method: "DELETE" });
     handleWriteResult(res, "Unban de " + value);
   } catch (e) {
     reportWriteError(e, "unban de " + value);
+  }
+  await refreshAfterWrite();
+}
+
+// Modal global de desbanir por IP/CIDR digitado (complementa o unban por linha).
+function openUnbanModal(prefillIp = "", onDone = null) {
+  $("#unbanValue").value = prefillIp || "";
+  state.unbanContext = onDone;
+  $("#unbanModal").showModal();
+  setTimeout(() => $("#unbanValue").focus(), 50);
+}
+
+async function confirmUnban() {
+  const value = $("#unbanValue").value.trim();
+  if (!value) { toast("Informe um IP ou CIDR.", "warning"); return; }
+  const btn = $("#unbanConfirm");
+  btn.classList.add("loading"); btn.disabled = true;
+  try {
+    const res = await apiFetch("/api/decisions/by-ip?value=" + encodeURIComponent(value), { method: "DELETE" });
+    handleWriteResult(res, "Unban de " + value);
+    if (res && res.ok) {
+      $("#unbanModal").close();
+      if (typeof state.unbanContext === "function") state.unbanContext();
+    }
+  } catch (e) {
+    reportWriteError(e, "unban de " + value);
+  } finally {
+    btn.classList.remove("loading"); btn.disabled = false;
   }
   await refreshAfterWrite();
 }
@@ -1681,6 +1872,76 @@ async function patchDuration(value, duration, reason) {
     reportWriteError(e, "alterar duração de " + value);
   }
   await refreshAfterWrite();
+}
+
+/* ================================================================ WHITELIST */
+async function loadWhitelist() {
+  const body = $("#wlBody");
+  try {
+    const res = await apiFetch("/api/whitelist");
+    const items = (res && res.items) || [];
+    body.innerHTML = "";
+    if (!items.length) {
+      body.append(el("tr", {}, el("td", { colspan: "4", class: "text-center opacity-60 py-6" }, "Whitelist vazia.")));
+      return;
+    }
+    for (const it of items) {
+      const rm = el("button", {
+        class: "btn btn-xs btn-ghost text-error",
+        title: "Remover da whitelist",
+        onclick: () => removeWhitelistIp(it.value),
+      }, "Remover");
+      body.append(el("tr", {},
+        el("td", { class: "mono text-xs whitespace-nowrap" }, it.value ?? "—"),
+        el("td", { class: "text-xs" }, it.description || "—"),
+        el("td", { class: "text-xs whitespace-nowrap" }, it.created_at ? fmtLocal(it.created_at) : "—"),
+        el("td", { class: "text-right" }, rm),
+      ));
+    }
+  } catch (e) {
+    body.innerHTML = "";
+    body.append(el("tr", {}, el("td", { colspan: "4", class: "text-center text-error py-6" }, "Erro: " + e.message)));
+  }
+}
+
+async function addWhitelist() {
+  const value = $("#wlValue").value.trim();
+  const comment = $("#wlComment").value.trim();
+  if (!value) { toast("Informe um IP ou CIDR.", "warning"); return; }
+  const btn = $("#wlAdd");
+  btn.classList.add("loading"); btn.disabled = true;
+  try {
+    const res = await apiFetch("/api/whitelist", { method: "POST", body: { value, comment } });
+    if (res && res.ok) {
+      $("#wlValue").value = ""; $("#wlComment").value = "";
+      if (res.unban_ok === false) {
+        // Adicionou à whitelist, mas a remoção de bans ativos falhou.
+        toast(esc(value) + " adicionado à whitelist, mas falhou ao remover bans ativos" +
+          (res.unban_stderr ? ": " + esc(res.unban_stderr) : "") + ".", "warning", 8000);
+      } else {
+        toast(esc(value) + " adicionado à whitelist (bans ativos removidos).", "success");
+      }
+    } else {
+      const stderr = (res && res.stderr && res.stderr.trim()) || "";
+      toast("Falha ao adicionar à whitelist" + (stderr ? ": " + esc(stderr) : "") + ".", "error", 9000);
+    }
+  } catch (e) {
+    reportWriteError(e, "adicionar " + value + " à whitelist");
+  } finally {
+    btn.classList.remove("loading"); btn.disabled = false;
+  }
+  loadWhitelist();
+}
+
+async function removeWhitelistIp(value) {
+  if (!confirm(`Remover ${value} da whitelist?\n\nO CrowdSec volta a poder bloquear esse IP.`)) return;
+  try {
+    const res = await apiFetch("/api/whitelist?value=" + encodeURIComponent(value), { method: "DELETE" });
+    handleWriteResult(res, "Remover " + value + " da whitelist");
+  } catch (e) {
+    reportWriteError(e, "remover " + value + " da whitelist");
+  }
+  loadWhitelist();
 }
 
 /* ================================================================ AUDITORIA */
@@ -1826,7 +2087,7 @@ async function loadAlertHistory() {
         el("td", { class: "whitespace-nowrap" }, flag),
         el("td", { class: "mono text-xs" }, it.asn ?? "—"),
         el("td", { class: "text-xs" }, it.scenario ?? "—"),
-        el("td", { class: "text-xs" }, it.origin ?? "—"),
+        el("td", { class: "text-xs" }, originLabel(it.origin)),
         el("td", { class: "text-xs" }, it.duration ?? "—"),
         el("td", { class: "text-xs" }, chStr),
       ));
@@ -1860,9 +2121,33 @@ function openBanModal(prefillIp = "", onDone = null) {
   $("#banDurFree").classList.add("hidden");
   $("#banType").value = "ban";
   $("#banReason").value = "";
+  // Reseta o aviso de whitelist e checa o IP pré-preenchido.
+  $("#banWlWarn").classList.add("hidden");
+  $("#banWlRemove").checked = false;
   state.banContext = onDone;
   $("#banModal").showModal();
   setTimeout(() => (prefillIp ? $("#banDurPreset") : $("#banValue")).focus(), 50);
+  if (prefillIp) refreshBanWhitelistWarning(prefillIp);
+}
+
+// Mostra/esconde o aviso de whitelist no modal conforme o IP digitado. Apenas UX;
+// a decisão final é revalidada em confirmBan().
+async function refreshBanWhitelistWarning(value) {
+  const warn = $("#banWlWarn");
+  value = (value || "").trim();
+  if (!value) { warn.classList.add("hidden"); return; }
+  let chk;
+  try {
+    chk = await apiFetch("/api/whitelist/check?value=" + encodeURIComponent(value));
+  } catch (_) { return; }  // IP inválido/parcial enquanto digita: ignora
+  // Só reage se o campo ainda contém o mesmo valor (evita corrida ao digitar).
+  if ($("#banValue").value.trim() !== value) return;
+  if (chk && chk.allowlisted) {
+    warn.classList.remove("hidden");
+  } else {
+    warn.classList.add("hidden");
+    $("#banWlRemove").checked = false;
+  }
 }
 
 async function confirmBan() {
@@ -1875,7 +2160,23 @@ async function confirmBan() {
   const btn = $("#banConfirm");
   btn.classList.add("loading"); btn.disabled = true;
   try {
-    const res = await apiFetch("/api/decisions", { method: "POST", body: { value, duration, reason, type } });
+    // Revalida a whitelist na hora do ban (a allowlist do CrowdSec BLOQUEIA o ban
+    // de um IP allowlistado). Se estiver na whitelist, exige o switch p/ prosseguir.
+    let chk = null;
+    try { chk = await apiFetch("/api/whitelist/check?value=" + encodeURIComponent(value)); } catch (_) {}
+    let bypass = false;
+    if (chk && chk.allowlisted) {
+      $("#banWlWarn").classList.remove("hidden");
+      if (!$("#banWlRemove").checked) {
+        toast("Este IP está na whitelist. Ative 'Remover da whitelist e banir' para prosseguir.", "warning", 7000);
+        return;
+      }
+      // Melhor esforço: remove a entrada EXATA da whitelist (se o IP estiver coberto
+      // por um CIDR, a remoção falha — e o --bypass-allowlist abaixo garante o ban).
+      try { await apiFetch("/api/whitelist?value=" + encodeURIComponent(value), { method: "DELETE" }); } catch (_) {}
+      bypass = true;  // banir mesmo que ainda coberto por alguma allowlist
+    }
+    const res = await apiFetch("/api/decisions", { method: "POST", body: { value, duration, reason, type, bypass_allowlist: bypass } });
     handleWriteResult(res, "Ban de " + value + " por " + duration);
     if (res && res.ok) {
       $("#banModal").close();
@@ -2067,18 +2368,61 @@ function statusBadgeClass(status) {
   return "badge-ghost";
 }
 
+// Abre o modal de detalhe de uma linha de log com TODOS os campos.
+function openLogDetail(it) {
+  const box = $("#logDetailBody");
+  box.innerHTML = "";
+  // Linha rótulo→valor. `valNode` pode ser string ou um nó (badge, etc.).
+  const row = (label, valNode, opts = {}) => {
+    const v = el("div", { class: "flex-1 min-w-0 " + (opts.mono ? "mono " : "") + (opts.wrap ? "break-words" : "whitespace-nowrap overflow-hidden text-ellipsis") });
+    if (valNode && valNode.nodeType) v.append(valNode); else v.append(document.createTextNode(valNode == null || valNode === "" ? "—" : String(valNode)));
+    box.append(el("div", { class: "flex gap-3 py-1.5" },
+      el("div", { class: "opacity-60 w-36 shrink-0" }, label),
+      v,
+    ));
+  };
+
+  // IP (+ CF badge + geoloc sob demanda).
+  const ipVal = el("div", { class: "flex items-center gap-2 flex-wrap mono" }, it.ip ?? "—");
+  if (it.cf) ipVal.append(el("span", { class: "badge badge-warning badge-xs", title: "IP da borda Cloudflare" }, "CF"));
+  ipVal.append(geoipControl(it.ip));
+  row("IP", ipVal);
+
+  const via = it.access_via || it.site || "—";
+  const viaDirect = via === "IP direto";
+  row("Acesso / Domínio", el("span", { class: "badge badge-sm " + (viaDirect ? "badge-error badge-outline" : "badge-ghost") }, via));
+  row("Arquivo (site)", it.site);
+  row("Quando", it.time ? fmtLocal(it.time) : (it.time_raw || "—"));
+  row("Método", it.method);
+  row("Rota", it.path, { mono: true, wrap: true });
+  row("Protocolo", it.proto);
+  row("Status", el("span", { class: "badge badge-sm " + statusBadgeClass(it.status) }, it.status ?? "—"));
+  row("Tamanho", it.size == null ? "—" : fmtBytes(it.size));
+  row("Referer", it.referer && it.referer !== "-" ? it.referer : "—", { wrap: true });
+  row("User-Agent", it.ua, { wrap: true });
+  row("Banido", it.banned
+    ? el("span", { class: "badge badge-error badge-sm" }, "sim")
+    : el("span", { class: "badge badge-ghost badge-sm" }, "não"));
+
+  // Botão "Banir este IP": fecha o detalhe e abre o modal de banir.
+  const banBtn = $("#logDetailBan");
+  banBtn.onclick = () => { $("#logDetailModal").close(); openBanModal(it.ip, () => loadLogs()); };
+
+  $("#logDetailModal").showModal();
+}
+
 function renderLogs(items) {
   const body = $("#lgBody");
   body.innerHTML = "";
   if (!items.length) {
-    body.append(el("tr", {}, el("td", { colspan: "10", class: "text-center opacity-60 py-6" }, "Nenhuma linha corresponde aos filtros.")));
+    body.append(el("tr", {}, el("td", { colspan: "8", class: "text-center opacity-60 py-6" }, "Nenhuma linha corresponde aos filtros.")));
     return;
   }
   for (const it of items) {
     if (!it.matched) {
       // Linha não parseada — mostrada crua em monospace.
       body.append(el("tr", { class: "opacity-70" },
-        el("td", { colspan: "10", class: "mono text-xs", style: "white-space:pre-wrap;word-break:break-all" },
+        el("td", { colspan: "8", class: "mono text-xs", style: "white-space:pre-wrap;word-break:break-all" },
           "⚠ não parseada: " + esc(it.raw ?? "")),
       ));
       continue;
@@ -2086,7 +2430,11 @@ function renderLogs(items) {
     const banned = it.banned
       ? el("span", { class: "badge badge-error badge-sm", title: "IP atualmente banido" }, "banido")
       : "";
+    // Ações: Detalhe (abre modal com TUDO: UA, acesso/domínio, etc.) + Banir.
+    const detBtn = el("button", { class: "btn btn-xs btn-ghost", title: "Ver detalhes da requisição", onclick: () => openLogDetail(it) }, "Detalhe");
     const banBtn = el("button", { class: "btn btn-xs btn-error btn-outline", onclick: () => openBanModal(it.ip, () => loadLogs()) }, "Banir");
+    const actions = el("td", { class: "text-right whitespace-nowrap" });
+    actions.append(detBtn, " ", banBtn);
 
     // Célula do IP: se for da Cloudflare, adiciona badge "CF" com aviso de que
     // o IP registrado é da borda da CF (o real depende do log_format do vhost).
@@ -2100,27 +2448,15 @@ function renderLogs(items) {
     }
     ipCell.append(" ", geoipControl(it.ip));
 
-    // Célula de acesso / domínio: como o visitante chegou (domínio ou IP direto).
-    const via = it.access_via || it.site || "—";
-    const viaDirect = via === "IP direto";
-    const viaCell = el("td", { class: "text-xs whitespace-nowrap" },
-      el("span", {
-        class: "badge badge-sm " + (viaDirect ? "badge-error badge-outline" : "badge-ghost"),
-        title: it.site ? ("arquivo: " + it.site) : "",
-      }, via),
-    );
-
     body.append(el("tr", {},
       ipCell,
-      viaCell,
       el("td", { class: "text-xs whitespace-nowrap" }, it.time ? fmtLocal(it.time) : (it.time_raw || "—")),
       el("td", { class: "text-xs" }, it.method ?? "—"),
       el("td", { class: "text-xs truncate-cell", title: it.path || "" }, it.path ?? "—"),
       el("td", {}, el("span", { class: "badge badge-sm " + statusBadgeClass(it.status) }, it.status ?? "—")),
       el("td", { class: "text-xs tnum whitespace-nowrap" }, it.size == null ? "—" : fmtBytes(it.size)),
-      el("td", { class: "text-xs truncate-ua opacity-80", title: it.ua || "" }, it.ua ?? "—"),
       el("td", {}, banned),
-      el("td", {}, banBtn),
+      actions,
     ));
   }
 }
@@ -2380,13 +2716,19 @@ function wireEvents() {
   $("#tsDays").addEventListener("change", loadTimeseries);
   $("#tsOrigin").addEventListener("change", loadTimeseries);
 
-  // Decisões.
-  $("#decApply").addEventListener("click", () => { state.decisions.page = 1; loadDecisions(); });
-  $("#decSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") { state.decisions.page = 1; loadDecisions(); } });
-  $("#decActiveOnly").addEventListener("change", () => { state.decisions.page = 1; loadDecisions(); });
+  // Decisões — filtros aplicam sozinhos (sem botão "Aplicar"): selects/checkbox
+  // na hora; campo de IP ao digitar (debounce). Enter continua funcionando.
+  const decReload = () => { state.decisions.page = 1; loadDecisions(); };
+  const decReloadDebounced = debounce(decReload, 350);
+  $("#decSearch").addEventListener("input", decReloadDebounced);
+  $("#decSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") { decReloadDebounced.cancel?.(); decReload(); } });
+  $("#decType").addEventListener("change", decReload);
+  $("#decOrigin").addEventListener("change", decReload);
+  $("#decActiveOnly").addEventListener("change", decReload);
   $("#decPrev").addEventListener("click", () => pagerStep(state.decisions, -1, loadDecisions));
   $("#decNext").addEventListener("click", () => pagerStep(state.decisions, +1, loadDecisions));
   $("#btnBanGlobal").addEventListener("click", () => openBanModal("", () => loadDecisions()));
+  $("#btnUnbanGlobal").addEventListener("click", () => openUnbanModal("", () => loadDecisions()));
 
   // Auditoria.
   $("#audRefresh").addEventListener("click", () => { state.audit.page = 1; loadAudit(); });
@@ -2397,19 +2739,37 @@ function wireEvents() {
   $("#alSave").addEventListener("click", saveAlertConfig);
   $("#alTest").addEventListener("click", testAlert);
 
+  // Whitelist.
+  $("#wlAdd").addEventListener("click", addWhitelist);
+  $("#wlValue").addEventListener("keydown", (e) => { if (e.key === "Enter") addWhitelist(); });
+  $("#wlComment").addEventListener("keydown", (e) => { if (e.key === "Enter") addWhitelist(); });
+  $("#wlRefresh").addEventListener("click", loadWhitelist);
+
   // Modais.
   wirePresetToggle($("#banDurPreset"), $("#banDurFree"));
   wirePresetToggle($("#durPreset"), $("#durFree"));
   $("#banConfirm").addEventListener("click", confirmBan);
   $("#durConfirm").addEventListener("click", confirmDuration);
+  $("#unbanConfirm").addEventListener("click", confirmUnban);
+  $("#unbanValue").addEventListener("keydown", (e) => { if (e.key === "Enter") confirmUnban(); });
+  // Ao digitar o IP no modal de banir, checa a whitelist (debounce) e mostra o aviso.
+  $("#banValue").addEventListener("input", debounce((e) => refreshBanWhitelistWarning(e.target.value), 400));
 
   // Logs. Os dois seletores de arquivo (Listagem e Estatísticas) compartilham o
   // mesmo estado via setLogFile(), que sincroniza ambos.
   $("#logFile").addEventListener("change", (e) => setLogFile(e.target.value, e.target));
   $("#lgStatsFileSel").addEventListener("change", (e) => setLogFile(e.target.value, e.target));
   $("#lgStatsLines").addEventListener("change", loadLogStats);
-  $("#lgApply").addEventListener("click", () => { state.logs.page = 1; loadLogs(); });
-  $("#lgQ").addEventListener("keydown", (e) => { if (e.key === "Enter") { state.logs.page = 1; loadLogs(); } });
+  // Logs — filtros aplicam sozinhos: campos de texto ao digitar (debounce),
+  // selects na hora. Sem botão "Aplicar". Enter continua funcionando.
+  const lgReload = () => { state.logs.page = 1; loadLogs(); };
+  const lgReloadDebounced = debounce(lgReload, 350);
+  for (const id of ["#lgIp", "#lgStatus", "#lgPath", "#lgUa", "#lgQ"]) {
+    $(id).addEventListener("input", lgReloadDebounced);
+  }
+  $("#lgQ").addEventListener("keydown", (e) => { if (e.key === "Enter") { lgReloadDebounced.cancel(); lgReload(); } });
+  $("#lgMethod").addEventListener("change", lgReload);
+  $("#lgLines").addEventListener("change", lgReload);
   $("#lgPrev").addEventListener("click", () => pagerStep(state.logs, -1, loadLogs));
   $("#lgNext").addEventListener("click", () => pagerStep(state.logs, +1, loadLogs));
   $("#lgStatsRefresh").addEventListener("click", loadLogStats);
@@ -2427,6 +2787,12 @@ function init() {
   const r = parseRoute(window.location.pathname);
   navigate(r.view, r.sub, { push: false });
   bootAfterAuth();
+  revealApp();                // estilos já aplicados: remove o splash anti-FOUC
+}
+
+// Revela a UI (remove o splash). Idempotente.
+function revealApp() {
+  document.documentElement.classList.add("app-ready");
 }
 
 // Chart.js pode ainda não estar disponível se o CDN atrasar; aguardamos.
@@ -2457,4 +2823,9 @@ if (document.readyState === "loading") {
 } else {
   whenReady();
 }
+
+// Rede de segurança do splash: revela a UI mesmo se o init() atrasar/falhar
+// (nunca deixa a tela presa no spinner).
+window.addEventListener("load", revealApp);
+setTimeout(revealApp, 6000);
 </script>

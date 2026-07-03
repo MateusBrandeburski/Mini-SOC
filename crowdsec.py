@@ -18,6 +18,7 @@ Conhecimento validado respeitado aqui:
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import shutil
 import sqlite3
@@ -49,6 +50,10 @@ def validate_ip_or_cidr(value: str) -> tuple[str, str]:
         raise ValueError("IP/CIDR vazio")
     if "/" in value:
         net = ipaddress.ip_network(value, strict=False)
+        # Bloqueia range catch-all (/0): banir 0.0.0.0/0 seria auto-DoS e
+        # allowlistar ::/0 desligaria todo o CrowdSec.
+        if net.prefixlen == 0:
+            raise ValueError("range catch-all (0.0.0.0/0 ou ::/0) não é permitido")
         # Se a máscara cobre um único host, tratamos como IP.
         if net.num_addresses == 1:
             return "ip", str(net.network_address)
@@ -529,10 +534,13 @@ def add_decision(
     duration: str,
     reason: str,
     type_: str = "ban",
+    bypass_allowlist: bool = False,
 ) -> CscliResult:
     """Adiciona uma decisão (ban) via cscli. Valida IP/CIDR e duração.
 
-    Usa --ip para host único e --range para CIDR.
+    Usa --ip para host único e --range para CIDR. Com bypass_allowlist=True
+    acrescenta --bypass-allowlist para banir mesmo que o IP esteja em ALGUMA
+    allowlist (necessário quando o usuário confirma "banir mesmo na whitelist").
     """
     kind, normalized = validate_ip_or_cidr(value)
     dur = validate_duration(duration)
@@ -546,14 +554,23 @@ def add_decision(
         "--reason", reason,
         "--type", type_,
     ]
+    if bypass_allowlist:
+        args.append("--bypass-allowlist")
     return _run_cscli(args)
 
 
-def delete_decision_by_ip(value: str) -> CscliResult:
-    """Remove TODAS as decisões de um IP/range (unban completo)."""
+def delete_decision_by_ip(value: str, contained: bool = False) -> CscliResult:
+    """Remove TODAS as decisões de um IP/range (unban completo).
+
+    Para um range, contained=True acrescenta --contained, removendo também as
+    decisões por-IP CONTIDAS na faixa (usado ao adicionar um CIDR à whitelist).
+    """
     kind, normalized = validate_ip_or_cidr(value)
     flag = "--ip" if kind == "ip" else "--range"
-    return _run_cscli(["decisions", "delete", flag, normalized])
+    args = ["decisions", "delete", flag, normalized]
+    if contained and kind == "range":
+        args.append("--contained")
+    return _run_cscli(args)
 
 
 def delete_decision_by_id(decision_id: int) -> CscliResult:
@@ -584,3 +601,84 @@ def change_duration(*, value: str, new_duration: str, reason: str) -> CscliResul
         stdout=combined_stdout,
         stderr=combined_stderr,
     )
+
+
+# ---------------------------------------------------------------------------
+# ALLOWLIST (whitelist) — via `cscli allowlists`
+# ---------------------------------------------------------------------------
+# O painel gerencia UMA allowlist dedicada (ALLOWLIST_NAME). IPs/CIDRs nela
+# NUNCA são bloqueados pelo CrowdSec: `cscli decisions add` num IP allowlistado
+# é rejeitado (erro "use --bypass-allowlist"). Feature dinâmica: sem reiniciar o
+# CrowdSec e sem editar arquivos de parser.
+ALLOWLIST_NAME = "painel"
+_ALLOWLIST_DESC = "Whitelist gerenciada pelo Mini SOC (nunca bloquear)"
+
+
+def _ensure_allowlist() -> None:
+    """Cria a allowlist do painel se ainda não existir (idempotente)."""
+    res = _run_cscli(["allowlists", "create", ALLOWLIST_NAME, "-d", _ALLOWLIST_DESC])
+    # 'already exists' não é erro para nós; qualquer outra falha é ignorada aqui
+    # e vai reaparecer na operação seguinte (add), que reporta o erro real.
+
+
+def allowlist_list() -> list[dict[str, Any]]:
+    """Itens da allowlist do painel: [{value, description, created_at, expiration}].
+
+    Somente-leitura. Se a allowlist ainda não existe, devolve lista vazia.
+    """
+    res = _run_cscli(["allowlists", "inspect", ALLOWLIST_NAME, "-o", "json"])
+    if not res.ok:
+        return []
+    try:
+        data = json.loads(res.stdout or "{}")
+    except (ValueError, TypeError):
+        return []
+    items = data.get("items") or []
+    out: list[dict[str, Any]] = []
+    for it in items:
+        exp = it.get("expiration") or ""
+        # CrowdSec usa 0001-01-01 para "sem expiração".
+        if isinstance(exp, str) and exp.startswith("0001-01-01"):
+            exp = None
+        out.append({
+            "value": it.get("value"),
+            "description": it.get("description") or "",
+            "created_at": it.get("created_at"),
+            "expiration": exp,
+        })
+    return out
+
+
+def allowlist_add(value: str, comment: str = "") -> CscliResult:
+    """Adiciona um IP/CIDR à allowlist do painel (cria a allowlist se preciso)."""
+    _kind, normalized = validate_ip_or_cidr(value)
+    comment = (comment or "painel: whitelist manual").strip()[:200]
+    _ensure_allowlist()
+    return _run_cscli(["allowlists", "add", ALLOWLIST_NAME, normalized, "-d", comment])
+
+
+def allowlist_remove(value: str) -> CscliResult:
+    """Remove um IP/CIDR da allowlist do painel."""
+    _kind, normalized = validate_ip_or_cidr(value)
+    return _run_cscli(["allowlists", "remove", ALLOWLIST_NAME, normalized])
+
+
+def allowlist_check(value: str) -> dict[str, Any]:
+    """Verifica se um IP/CIDR está allowlistado (em QUALQUER allowlist).
+
+    `cscli allowlists check` faz o casamento por CIDR e sempre sai com código 0;
+    o resultado vem no texto ("... is allowlisted by ..." | "... is not allowlisted").
+    Retorna {allowlisted: bool, detail: str}.
+    """
+    _kind, normalized = validate_ip_or_cidr(value)
+    res = _run_cscli(["allowlists", "check", normalized])
+    text = (res.stdout or "") + (res.stderr or "")
+    low = text.lower()
+    # "is not allowlisted" contém "allowlisted"; por isso testamos o negativo 1º.
+    if "not allowlisted" in low:
+        allowlisted = False
+    elif "is allowlisted" in low or "allowlisted by" in low:
+        allowlisted = True
+    else:
+        allowlisted = False
+    return {"allowlisted": allowlisted, "detail": text.strip()}
