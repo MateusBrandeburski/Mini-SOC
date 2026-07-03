@@ -52,9 +52,17 @@ def _get_list(name: str, default: list[str] | None = None) -> list[str]:
 
 # Regex combined padrão do nginx. Grupos nomeados esperados pelo parser:
 # ip, user, time, method, path, proto, status, size, referer, ua
+#
+# A "request line" entre aspas normalmente é "<method> <path> <proto>", mas
+# clientes maliciosos/malformados mandam lixo que o nginx escapa e loga como
+# uma request única sem os três campos (ex.: handshake SOCKS5 "\x05\x01\x00",
+# scans que mandam só o método, requisições sem versão de protocolo etc.).
+# Nesses casos o nginx responde 400. Para não perder essas linhas, o miolo da
+# request é capturado inteiro em (?P<request>...) e depois quebrado em
+# method/path/proto pelo parser, de forma tolerante.
 DEFAULT_NGINX_REGEX = (
     r'^(?P<ip>\S+) \S+ (?P<user>\S+) \[(?P<time>[^\]]+)\] '
-    r'"(?P<method>\S+) (?P<path>[^"]*?) (?P<proto>[^"]*)" '
+    r'"(?P<request>[^"]*)" '
     r'(?P<status>\d{3}) (?P<size>\S+) "(?P<referer>[^"]*)" "(?P<ua>[^"]*)"'
 )
 

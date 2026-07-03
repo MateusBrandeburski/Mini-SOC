@@ -112,7 +112,9 @@ def host_from_referer(referer: str | None) -> str | None:
 
 # ---------------------------------------------------------------------------
 # Regex compilada (cache) — grupos nomeados esperados:
-#   ip, user, time, method, path, proto, status, size, referer, ua
+#   ip, user, time, status, size, referer, ua e a request line em <request>
+#   (o parser quebra <request> em method/path/proto de forma tolerante).
+#   Regex legadas com method/path/proto explícitos continuam funcionando.
 # ---------------------------------------------------------------------------
 _regex_cache: tuple[str, re.Pattern[str]] | None = None
 
@@ -241,6 +243,31 @@ def _to_int(value: str | None) -> int | None:
         return None
 
 
+def _split_request(request: str | None) -> tuple[str | None, str | None, str | None]:
+    """Quebra a request line do nginx em (method, path, proto), tolerante a lixo.
+
+    O formato normal é "<method> <path> <proto>" (ex.: 'GET /x HTTP/1.1'), mas
+    requisições malformadas/maliciosas chegam sem os três campos:
+      '\\x05\\x01\\x00'      (handshake SOCKS5) -> só o "método", sem path/proto
+      'GET /favicon.ico'    (sem versão)        -> method + path, sem proto
+      ''                    (request vazia)     -> tudo None
+    Nunca levanta exceção; devolve None nos campos ausentes.
+    """
+    if request is None:
+        return None, None, None
+    req = request.strip()
+    if not req:
+        return None, None, None
+    parts = req.split(" ")
+    if len(parts) == 1:
+        # Só um token: tratamos como "método"/request bruta (ex.: lixo binário).
+        return parts[0], None, None
+    if len(parts) == 2:
+        return parts[0], parts[1], None
+    # 3+ tokens: method, proto é o último, path é tudo no meio (pode ter espaço).
+    return parts[0], " ".join(parts[1:-1]), parts[-1]
+
+
 def _parse_time(raw: str | None) -> str | None:
     """Converte o $time_local do nginx para ISO-8601; None se não parsear."""
     if not raw:
@@ -278,15 +305,26 @@ def parse_line(line: str) -> dict[str, Any]:
     host = g.get("host") or None
     if host in ("", "-"):
         host = None
+
+    # A request pode vir como um único grupo <request> (regex tolerante padrão)
+    # ou já quebrada em method/path/proto (regex customizada legada). Preferimos
+    # os campos explícitos se presentes; senão quebramos o <request>.
+    if g.get("method") is not None or g.get("proto") is not None:
+        method = g.get("method")
+        path = g.get("path")
+        proto = g.get("proto")
+    else:
+        method, path, proto = _split_request(g.get("request"))
+
     return {
         "matched": True,
         "ip": ip,
         "user": g.get("user"),
         "time_raw": time_raw,
         "time": _parse_time(time_raw),
-        "method": g.get("method"),
-        "path": g.get("path"),
-        "proto": g.get("proto"),
+        "method": method,
+        "path": path,
+        "proto": proto,
         "status": _to_int(g.get("status")),
         "size": _to_int(g.get("size")),
         "referer": referer,
