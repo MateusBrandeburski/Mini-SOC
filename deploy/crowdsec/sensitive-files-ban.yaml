@@ -1,0 +1,28 @@
+type: trigger
+name: custom/http-sensitive-files-ban
+description: "Sondagem de arquivo sensível (.env/.git/.aws...) - ban imediato e permanente"
+# Bane na 1ª tentativa de acesso a arquivo/pasta sensível, em QUALQUER log/domínio.
+# Complementa custom/direct-ip-access (que só cobre acesso pelo IP cru) e pré-empta
+# o crowdsecurity/http-sensitive-files (leaky, capacity 4). Reutiliza a lista mantida
+# sensitive_data.txt e reforça com padrões críticos explícitos.
+filter: |
+  evt.Meta.log_type in ["http_access-log", "http_error-log"] and
+  (
+    any(File("sensitive_data.txt"), { evt.Parsed.request endsWith #}) or
+    evt.Parsed.request contains "/.env" or
+    evt.Parsed.request contains "/.git/" or
+    evt.Parsed.request contains "/.aws/" or
+    evt.Parsed.request contains "/.ssh/"
+  )
+groupby: "evt.Meta.source_ip"
+blackhole: 1m
+data:
+  - source_url: https://hub-data.crowdsec.net/web/sensitive_data.txt
+    dest_file: sensitive_data.txt
+    type: string
+labels:
+  remediation: true
+  type: scan
+  service: http
+  behavior: "http:scan"
+  label: "Acesso a arquivo sensível (ban imediato)"
