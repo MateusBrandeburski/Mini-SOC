@@ -386,6 +386,7 @@
               <input id="liveToggle" type="checkbox" class="toggle toggle-success" />
               <span class="label-text text-xs">Tail ao vivo</span>
             </label>
+            <button id="btnBanGlobalLogs" class="btn btn-sm btn-error">Banir IP</button>
           </div>
         </div>
 
@@ -2832,6 +2833,7 @@ function wireEvents() {
   $("#lgStatsRefresh").addEventListener("click", loadLogStats);
   $("#liveToggle").addEventListener("change", (e) => toggleLive(e.target.checked));
   $("#liveClear").addEventListener("click", () => { $("#liveArea").innerHTML = ""; });
+  $("#btnBanGlobalLogs").addEventListener("click", () => openBanModal("", () => loadLogs()));
 }
 
 /* ---- Inicialização ---- */
