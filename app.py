@@ -37,9 +37,21 @@ STATIC_DIR = settings.base_dir / "static"
 INDEX_FILE = STATIC_DIR / "index.html"
 
 
+# Valor de fallback inseguro definido em config.py quando APP_SECRET não é setado.
+_INSECURE_APP_SECRET = "CHANGE-ME-INSECURE-DEFAULT"
+
+
 # --------------------------------------------------------------------------- lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Falha rápido se o segredo de sessão não foi configurado: sem ele, os cookies
+    # são assinados com uma chave PÚBLICA conhecida (permite forjar sessão). Fica
+    # aqui (startup do servidor) e não no import, para não quebrar `python auth.py`.
+    if not settings.app_secret or settings.app_secret == _INSECURE_APP_SECRET:
+        raise RuntimeError(
+            "APP_SECRET não configurado — o painel recusa iniciar. Gere um forte com "
+            "`python -c \"import secrets; print(secrets.token_urlsafe(48))\"` e defina no .env."
+        )
     # Inicializa o app.db (config alertas, watermark, auditoria).
     db.init_db()
     # Inicia o poller de alertas em background.

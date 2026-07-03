@@ -89,10 +89,11 @@ Todas as variáveis estão comentadas em [`.env.example`](.env.example). Tabela 
 |---|---|---|
 | `CROWDSEC_DB_TYPE` | `sqlite` | `sqlite`, `mysql` ou `mariadb` |
 | `CROWDSEC_DB_PATH` | `/var/lib/crowdsec/data/crowdsec.db` | caminho do SQLite do CrowdSec |
-| `CROWDSEC_DB_READONLY` | `1` | informativo (a app sempre lê read-only) |
+| `CROWDSEC_DB_READONLY` | `0` | informativo (a app sempre lê read-only; o `.env.example` envia `1`) |
 | `CSCLI_BIN` | `cscli` | caminho do binário `cscli` |
-| `CROWDSEC_DB_HOST/PORT/USER/PASSWORD/NAME` | — | só se `TYPE=mysql\|mariadb` |
-| `APP_SECRET` | — | **obrigatório** — segredo p/ assinar cookies (gere um forte) |
+| `CROWDSEC_DB_HOST/PORT/USER/NAME` | `127.0.0.1` / `3306` / `crowdsec` / `crowdsec` | só se `TYPE=mysql\|mariadb` |
+| `CROWDSEC_DB_PASSWORD` | — | senha do MySQL/MariaDB (só se migrado) |
+| `APP_SECRET` | — (obrigatório) | segredo p/ assinar cookies. **O painel recusa iniciar** sem ele (gere um forte) |
 | `ADMIN_USER` | `admin` | usuário de login |
 | `ADMIN_PASSWORD_HASH` | — | hash bcrypt da senha (gere com `python auth.py 'senha'`) |
 | `ADMIN_PASSWORD` | — | senha em texto plano — **só dev**, deixe vazio em prod |
@@ -109,7 +110,9 @@ Todas as variáveis estão comentadas em [`.env.example`](.env.example). Tabela 
 | `ALERT_ORIGINS` | `crowdsec,cscli` | origens que disparam alerta (evite CAPI/lists — muito volume) |
 | `ALERT_WEBHOOK_URL` | — | webhook (HTTP POST JSON) |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | — | canal Telegram |
-| `SMTP_HOST/PORT/USER/PASSWORD/FROM/TO/TLS` | — | canal e-mail |
+| `SMTP_HOST/USER/PASSWORD/FROM/TO` | — | canal e-mail (host/credenciais/remetente/destinos) |
+| `SMTP_PORT` | `587` | porta SMTP |
+| `SMTP_TLS` | `1` | STARTTLS |
 
 ### MySQL/MariaDB
 
