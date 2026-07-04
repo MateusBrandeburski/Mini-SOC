@@ -1,0 +1,32 @@
+# Deploy (scripts/arquivos de deploy locais)
+deploy.sh
+
+# Segredos e configuração local
+.env
+.env.local
+*.local
+
+# Banco de dados / dados de runtime
+*.db
+*.sqlite
+*.sqlite3
+
+# Ambiente virtual Python
+.venv/
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Logs
+*.log
+
+# Sistema operacional / editor
+.DS_Store
+.idea/
+.vscode/
