@@ -288,3 +288,14 @@ painel-crowdsec/
     ├── nginx-reverse-proxy.conf.example
     └── crowdsec/       # config do IDS (cenários, profiles, bouncers) + README
 ```
+
+## Contribuindo
+
+Contribuições são bem-vindas! Veja o guia em **[CONTRIBUTING.md](CONTRIBUTING.md)**
+para saber como reportar bugs, sugerir melhorias e enviar Pull Requests.
+
+## Licença
+
+Este projeto é distribuído sob a licença [MIT](LICENSE) — uso livre e gratuito,
+inclusive comercial. Você pode usar, copiar, modificar e distribuir o software,
+bastando manter o aviso de copyright e a licença. Sem garantias.
