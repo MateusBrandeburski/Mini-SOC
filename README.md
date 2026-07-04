@@ -16,6 +16,9 @@ do servidor (Debian). Feito para um "mini SOC" caseiro/interno.
 > profiles, bouncers, whitelist a nível de motor) está em **[`deploy/crowdsec/README.md`](deploy/crowdsec/README.md)**.
 
 ---
+<img width="1845" height="934" alt="Captura de tela de 2026-07-04 19-25-20" src="https://github.com/user-attachments/assets/bafdfd13-c814-494d-8950-338097168ba3" />
+<img width="1845" height="934" alt="image" src="https://github.com/user-attachments/assets/5b919ff7-ca78-4795-9be4-4989f197ba5f" />
+<img width="1845" height="934" alt="Captura de tela de 2026-07-04 19-25-25" src="https://github.com/user-attachments/assets/8e29318f-c40d-4263-9ecc-99d09c8c02fe" />
 
 ## Sumário
 
