@@ -34,6 +34,9 @@ no LXC de produção. Este diretório guarda cópias versionadas para reprodutib
   Título "Bloqueado pelo WAF", contato do admin, data (via JS) + "MINI SOC — BOTS
   NÃO PASSARÃO!", sem marca do CrowdSec. Instala em
   `/var/lib/crowdsec/lua/templates/ban.html` + `nginx -t && systemctl reload nginx`.
+  O **`deploy.sh` aplica isso automaticamente** a cada deploy: copia o `waf-ban.html`
+  para o `BAN_TEMPLATE_PATH` do bouncer e recarrega o nginx (com `nginx -t` antes).
+  Se o `crowdsec-nginx-bouncer` não estiver instalado, apenas avisa e segue.
 - `reference-profiles.yaml` — cópia de referência do `profiles.yaml` (duração dos bans).
 
 ## Cenários desativados (menos falso-positivo em uso normal)
