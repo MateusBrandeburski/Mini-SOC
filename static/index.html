@@ -440,12 +440,12 @@
           <table class="table table-sm table-zebra">
             <thead>
               <tr>
-                <th>IP</th><th>Hora</th><th>Método</th><th>Rota</th><th>Status</th>
+                <th>IP</th><th>Hora</th><th>Método</th><th>Acesso</th><th>Rota</th><th>Status</th>
                 <th>Tamanho</th><th></th><th class="text-right">Ações</th>
               </tr>
             </thead>
             <tbody id="lgBody">
-              <tr><td colspan="8" class="text-center opacity-60 py-6">selecione um arquivo…</td></tr>
+              <tr><td colspan="9" class="text-center opacity-60 py-6">selecione um arquivo…</td></tr>
             </tbody>
           </table>
         </div>
@@ -2400,7 +2400,7 @@ async function loadLogFiles() {
         selStats.dispatchEvent(new CustomEvent("options:changed"));
       }
       $("#lgBody").innerHTML = "";
-      $("#lgBody").append(el("tr", {}, el("td", { colspan: "10", class: "text-center opacity-60 py-6" }, "Nenhum arquivo de log disponível.")));
+      $("#lgBody").append(el("tr", {}, el("td", { colspan: "9", class: "text-center opacity-60 py-6" }, "Nenhum arquivo de log disponível.")));
       return;
     }
     const current = state.logs.file || files[0].name;
@@ -2448,6 +2448,7 @@ async function loadLogs() {
   } catch (e) {
     body.innerHTML = "";
     body.append(el("tr", {}, el("td", { colspan: "9", class: "text-center text-error py-6" }, "Erro: " + e.message)));
+    // colspan 9 = número de colunas da tabela (IP, Hora, Método, Acesso, Rota, Status, Tamanho, banido, Ações)
   } finally {
     body.parentElement.parentElement.classList.remove("is-loading");
   }
@@ -2519,14 +2520,14 @@ function renderLogs(items) {
   const body = $("#lgBody");
   body.innerHTML = "";
   if (!items.length) {
-    body.append(el("tr", {}, el("td", { colspan: "8", class: "text-center opacity-60 py-6" }, "Nenhuma linha corresponde aos filtros.")));
+    body.append(el("tr", {}, el("td", { colspan: "9", class: "text-center opacity-60 py-6" }, "Nenhuma linha corresponde aos filtros.")));
     return;
   }
   for (const it of items) {
     if (!it.matched) {
       // Linha não parseada — mostrada crua em monospace.
       body.append(el("tr", { class: "opacity-70" },
-        el("td", { colspan: "8", class: "mono text-xs", style: "white-space:pre-wrap;word-break:break-all" },
+        el("td", { colspan: "9", class: "mono text-xs", style: "white-space:pre-wrap;word-break:break-all" },
           "⚠ não parseada: " + esc(it.raw ?? "")),
       ));
       continue;
@@ -2556,10 +2557,23 @@ function renderLogs(items) {
     }
     ipCell.append(" ", geoipControl(it.ip));
 
+    // Célula "Acesso": domínio acessado (derivado do vhost/Host/Referer) ou "IP direto".
+    // Deixa explícito na tabela se a requisição chegou por um domínio e qual, ou se foi
+    // acesso pelo IP direto (vhost default). "—" = origem indeterminada (ex.: access.log
+    // genérico sem $host no log_format).
+    const via = it.access_via || it.site || "";
+    const viaNode = via === "IP direto"
+      ? el("span", { class: "badge badge-error badge-outline badge-sm", title: "Requisição pelo IP direto, sem domínio (vhost default)" }, "IP direto")
+      : via
+        ? el("span", { class: "badge badge-ghost badge-sm", title: "Domínio acessado: " + via }, via)
+        : "—";
+    const viaCell = el("td", { class: "text-xs truncate-cell", title: via || "origem indeterminada" }, viaNode);
+
     body.append(el("tr", {},
       ipCell,
       el("td", { class: "text-xs whitespace-nowrap" }, it.time ? fmtLocal(it.time) : (it.time_raw || "—")),
       el("td", { class: "text-xs" }, it.method ?? "—"),
+      viaCell,
       el("td", { class: "text-xs truncate-cell", title: it.path || "" }, it.path ?? "—"),
       el("td", {}, el("span", { class: "badge badge-sm " + statusBadgeClass(it.status) }, it.status ?? "—")),
       el("td", { class: "text-xs tnum whitespace-nowrap" }, it.size == null ? "—" : fmtBytes(it.size)),
