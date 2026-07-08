@@ -140,6 +140,7 @@ def _serve_index() -> FileResponse | JSONResponse:
 @app.get("/")
 @app.get("/crowdsec")
 @app.get("/logs")
+@app.get("/grafo")
 @app.get("/alertas")
 @app.get("/auditoria")
 @app.get("/whitelist")
@@ -416,6 +417,7 @@ async def api_audit(
 
 # ============================================================================ API (logs nginx)
 import nginx_logs  # noqa: E402  (import tardio p/ manter agrupamento lógico)
+import graph  # noqa: E402  (grafo investigativo; depende de nginx_logs/crowdsec/db)
 
 
 @app.get("/api/logs/files")
@@ -467,6 +469,33 @@ async def api_logs_stats(
 ):
     try:
         return nginx_logs.log_stats(file=file, lines=lines)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/graph")
+async def api_graph(
+    file: str | None = Query(None, description="arquivo de log; vazio/__all__ = todos os logs atuais"),
+    lines: int = Query(3000, ge=1, le=50000),
+    pivot: str | None = Query(None, description="IP central (modo vizinhança)"),
+    min_shared: int = Query(2, ge=1, le=50),
+    max_ips: int = Query(60, ge=1, le=300),
+    user: str = Depends(auth.require_auth),
+):
+    """Grafo investigativo de IPs (nós/arestas) a partir dos logs + CrowdSec."""
+    try:
+        banned = crowdsec.get_active_banned_ips()
+    except Exception:
+        banned = set()
+    try:
+        return graph.build_graph(
+            file=(file or None),
+            lines=lines,
+            pivot=(pivot or None),
+            min_shared=min_shared,
+            max_ips=max_ips,
+            banned_ips=banned,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

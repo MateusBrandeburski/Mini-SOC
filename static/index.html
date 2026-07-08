@@ -190,12 +190,16 @@
 
 <!-- Abas principais (wide, alinhadas com o conteúdo abaixo) -->
 <div class="px-2 sm:px-4 pt-4 max-w-[1400px] mx-auto">
-  <div role="tablist" class="tabs tabs-boxed bg-base-200 p-1.5 grid grid-cols-2 gap-1.5">
+  <div role="tablist" class="tabs tabs-boxed bg-base-200 p-1.5 grid grid-cols-3 gap-1.5">
     <a role="tab" class="tab tab-lg gap-2 font-semibold tab-active" data-main-tab="crowdsec">
       <img src="/static/crowdsec.png" alt="" class="w-5 h-5 shrink-0" /> CrowdSec
     </a>
     <a role="tab" class="tab tab-lg gap-2 font-semibold" data-main-tab="logs">
       <img src="/static/icon-nginx.svg" alt="" class="w-5 h-5 shrink-0" /> Logs Nginx
+    </a>
+    <a role="tab" class="tab tab-lg gap-2 font-semibold" data-main-tab="grafo">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6.8 7.7l3.7 8.1M17.2 7.7l-3.7 8.1M7.4 6h9.2"/></svg>
+      Grafo
     </a>
   </div>
 </div>
@@ -533,6 +537,77 @@
       </div>
 
     </div><!-- /sub-painel estatísticas -->
+  </section>
+
+  <!-- ================================================================ ABA GRAFO -->
+  <section data-panel="grafo" class="hidden space-y-3">
+    <div class="card bg-base-100 shadow">
+      <div class="card-body p-4 gap-3">
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <label class="label py-0"><span class="label-text text-xs">Origem</span></label>
+            <select id="graphFile" class="select select-sm select-bordered w-56 max-w-full">
+              <option value="__all__">Todos os logs (atuais)</option>
+            </select>
+          </div>
+          <div>
+            <label class="label py-0"><span class="label-text text-xs">Pivô (IP)</span></label>
+            <div class="join">
+              <input id="graphPivot" type="text" placeholder="ex.: 88.218.175.159" class="input input-sm input-bordered join-item w-48 mono" />
+              <button id="graphPivotClear" class="btn btn-sm join-item" title="Limpar pivô (voltar à visão geral)">✕</button>
+            </div>
+          </div>
+          <div>
+            <label class="label py-0"><span class="label-text text-xs">Mín. compart.</span></label>
+            <input id="graphMinShared" type="number" min="1" max="50" value="2" class="input input-sm input-bordered w-20" title="Nº mínimo de IPs para um atributo virar cluster" />
+          </div>
+          <div>
+            <label class="label py-0"><span class="label-text text-xs">Linhas/arquivo</span></label>
+            <input id="graphLines" type="number" min="100" max="50000" step="500" value="3000" class="input input-sm input-bordered w-24" />
+          </div>
+          <div>
+            <label class="label py-0"><span class="label-text text-xs">Máx. IPs</span></label>
+            <input id="graphMaxIps" type="number" min="5" max="300" step="5" value="60" class="input input-sm input-bordered w-20" />
+          </div>
+          <button id="graphReload" class="btn btn-sm btn-primary gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Montar grafo
+          </button>
+          <div id="graphStats" class="text-xs opacity-60 ml-auto self-center"></div>
+        </div>
+        <!-- Legenda de tipos de nó -->
+        <div id="graphLegend" class="flex flex-wrap gap-x-4 gap-y-1 text-[11px]"></div>
+      </div>
+    </div>
+
+    <div class="flex flex-col lg:flex-row gap-3">
+      <!-- Canvas do grafo -->
+      <div class="card bg-base-100 shadow flex-1 min-w-0">
+        <div class="card-body p-0 relative">
+          <div id="graphCanvasWrap" class="relative w-full" style="height:min(72vh,720px)">
+            <canvas id="graphCanvas" class="w-full h-full block rounded-box" style="cursor:grab"></canvas>
+            <div id="graphOverlay" class="absolute inset-0 flex items-center justify-center text-sm opacity-60 pointer-events-none"></div>
+            <div class="absolute bottom-2 right-2 flex gap-1">
+              <button id="graphZoomIn" class="btn btn-xs btn-circle" title="Aproximar">+</button>
+              <button id="graphZoomOut" class="btn btn-xs btn-circle" title="Afastar">−</button>
+              <button id="graphFit" class="btn btn-xs" title="Enquadrar tudo">enquadrar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Painel de detalhe do nó selecionado -->
+      <div class="card bg-base-100 shadow w-full lg:w-80 shrink-0">
+        <div class="card-body p-4">
+          <h3 class="font-semibold text-sm flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            Detalhe
+          </h3>
+          <div id="graphDetail" class="text-sm mt-1 space-y-1">
+            <p class="opacity-60 text-xs">Clique num nó para inspecionar. Clique num IP para pivotar/banir.</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- ================================================================ PÁGINA ALERTAS -->
@@ -1531,6 +1606,7 @@ function baseScales(opts = {}) {
 const VIEWS = {
   crowdsec:  { subs: ["painel", "decisoes"], defaultSub: "painel" },
   logs:      { subs: ["listagem", "estatisticas"], defaultSub: "listagem" },
+  grafo:     {},
   alertas:   {},
   auditoria: {},
   whitelist: {},
@@ -1590,6 +1666,7 @@ function navigate(view, sub = null, { push = true } = {}) {
   // Aplica sub-aba + dispara carregadores da visão.
   if (view === "crowdsec") applySubTab(sub);
   else if (view === "logs") { ensureLogsLoaded(); applyLogTab(sub); }
+  else if (view === "grafo") ensureGraphLoaded();
   else if (view === "alertas") { loadAlertConfig(); loadAlertHistory(); }
   else if (view === "auditoria") loadAudit();
   else if (view === "whitelist") loadWhitelist();
@@ -2710,6 +2787,390 @@ function bootAfterAuth() {
   loadOrigins().then(() => {
     if (state.view === "crowdsec" && state.subTab === "painel") loadPainel();
   });
+}
+
+/* ==================================================================== GRAFO ====
+   Grafo investigativo de IPs: força-dirigido desenhado em canvas puro (sem lib).
+   Nós = IPs + atributos compartilhados (UA, /24, ASN, país, cenário, rota de
+   scan, domínio). Dois IPs ligados ao mesmo atributo ficam visualmente juntos —
+   é assim que campanhas/botnets aparecem. Clique num IP para pivotar/banir. */
+const GRAPH_COLORS = {
+  ip:       "#e8823a", // laranja (marca) — IP comum
+  ipBanned: "#e0455e", // vermelho — IP banido
+  domain:   "#3b82f6", // azul — domínio/vhost
+  ua:       "#a855f7", // roxo — User-Agent/ferramenta
+  subnet:   "#14b8a6", // teal — sub-rede /24
+  asn:      "#22c55e", // verde — ASN/ISP
+  country:  "#94a3b8", // cinza — país
+  scenario: "#ec4899", // rosa — cenário CrowdSec
+  scanpath: "#f59e0b", // âmbar — rota de scan
+};
+const GRAPH_TYPE_LABEL = {
+  ip: "IP", domain: "Domínio", ua: "User-Agent", subnet: "Sub-rede /24",
+  asn: "ASN / ISP", country: "País", scenario: "Cenário", scanpath: "Rota de scan",
+};
+function graphNodeColor(n) {
+  if (n.type === "ip") return (n.meta && n.meta.banned) ? GRAPH_COLORS.ipBanned : GRAPH_COLORS.ip;
+  return GRAPH_COLORS[n.type] || "#888";
+}
+
+let _graphWired = false;
+
+// Chamado ao entrar na aba Grafo. Monta o grafo na 1ª vez; senão só retoma a animação.
+async function ensureGraphLoaded() {
+  wireGraphOnce();
+  if (!state._graph) await loadGraph();
+  else state._graph.resume();
+}
+
+function wireGraphOnce() {
+  if (_graphWired) return;
+  _graphWired = true;
+  refreshGraphFiles();
+  $("#graphReload").addEventListener("click", () => loadGraph());
+  $("#graphPivot").addEventListener("keydown", (e) => { if (e.key === "Enter") loadGraph(); });
+  $("#graphPivotClear").addEventListener("click", () => { $("#graphPivot").value = ""; loadGraph(); });
+  $("#graphFile").addEventListener("change", () => loadGraph());
+  $("#graphZoomIn").addEventListener("click", () => state._graph && state._graph.zoomBy(1.25));
+  $("#graphZoomOut").addEventListener("click", () => state._graph && state._graph.zoomBy(0.8));
+  $("#graphFit").addEventListener("click", () => state._graph && state._graph.fit());
+}
+
+// Popula o seletor de arquivos com a mesma lista dos logs (+ "todos").
+async function refreshGraphFiles() {
+  try {
+    const files = await apiFetch("/api/logs/files");
+    const sel = $("#graphFile");
+    const cur = sel.value;
+    sel.innerHTML = "";
+    sel.append(el("option", { value: "__all__" }, "Todos os logs (atuais)"));
+    for (const f of files) {
+      const site = f.site ? ` — ${f.site}` : "";
+      sel.append(el("option", { value: f.name }, f.name + site));
+    }
+    if (cur) sel.value = cur;
+  } catch (_) { /* silencioso */ }
+}
+
+async function loadGraph() {
+  wireGraphOnce();
+  const overlay = $("#graphOverlay");
+  overlay.textContent = "montando grafo…";
+  const qs = new URLSearchParams();
+  qs.set("file", $("#graphFile").value || "__all__");
+  qs.set("lines", $("#graphLines").value || "3000");
+  qs.set("min_shared", $("#graphMinShared").value || "2");
+  qs.set("max_ips", $("#graphMaxIps").value || "60");
+  const pivot = ($("#graphPivot").value || "").trim();
+  if (pivot) qs.set("pivot", pivot);
+  let data;
+  try {
+    data = await apiFetch("/api/graph?" + qs.toString());
+  } catch (e) {
+    overlay.textContent = "erro: " + e.message;
+    return;
+  }
+  renderGraphStats(data.stats);
+  renderGraphLegend(data);
+  if (!data.nodes || !data.nodes.length) {
+    overlay.textContent = pivot ? "nada relacionado a esse IP nos logs lidos" : "nenhum IP encontrado nos logs lidos";
+    if (state._graph) { state._graph.destroy(); state._graph = null; }
+    return;
+  }
+  overlay.textContent = "";
+  if (state._graph) state._graph.destroy();
+  state._graph = new GraphView($("#graphCanvas"), data, {
+    onSelect: showGraphNodeDetail,
+    onPivot: (ip) => { $("#graphPivot").value = ip; loadGraph(); },
+  });
+  state._graph.start();
+}
+
+function renderGraphStats(s) {
+  const box = $("#graphStats");
+  if (!s) { box.textContent = ""; return; }
+  const parts = [];
+  parts.push(`${s.ips} IPs`);
+  if (s.banned) parts.push(`${s.banned} banidos`);
+  parts.push(`${s.nodes} nós / ${s.edges} arestas`);
+  if (s.pivot) parts.push(`pivô ${s.pivot}`);
+  parts.push(`${fmtInt(s.lines_read)} linhas`);
+  box.textContent = parts.join(" · ");
+}
+
+function renderGraphLegend(data) {
+  const box = $("#graphLegend");
+  box.innerHTML = "";
+  const present = new Set((data.nodes || []).map((n) => n.type));
+  const hasBanned = (data.nodes || []).some((n) => n.type === "ip" && n.meta && n.meta.banned);
+  const chip = (color, label) => el("span", { class: "inline-flex items-center gap-1" },
+    el("span", { class: "inline-block rounded-full", style: `width:9px;height:9px;background:${color}` }),
+    el("span", { class: "opacity-80" }, label));
+  if (present.has("ip")) box.append(chip(GRAPH_COLORS.ip, "IP"));
+  if (hasBanned) box.append(chip(GRAPH_COLORS.ipBanned, "IP banido"));
+  for (const t of ["domain", "ua", "subnet", "asn", "country", "scenario", "scanpath"]) {
+    if (present.has(t)) box.append(chip(GRAPH_COLORS[t], GRAPH_TYPE_LABEL[t]));
+  }
+}
+
+// Painel lateral de detalhe do nó clicado.
+function showGraphNodeDetail(node) {
+  const box = $("#graphDetail");
+  box.innerHTML = "";
+  const row = (label, val, opts = {}) => {
+    if (val === null || val === undefined || val === "" || (Array.isArray(val) && !val.length)) return;
+    box.append(el("div", { class: "flex gap-2 py-0.5" },
+      el("div", { class: "opacity-60 w-24 shrink-0 text-xs" }, label),
+      el("div", { class: "flex-1 min-w-0 break-words " + (opts.mono ? "mono text-xs" : "text-xs") },
+        Array.isArray(val) ? val.join(", ") : String(val))));
+  };
+  const m = node.meta || {};
+  if (node.type === "ip") {
+    const head = el("div", { class: "flex items-center gap-2 flex-wrap mb-1" },
+      el("span", { class: "mono font-semibold" }, node.label));
+    if (m.is_pivot) head.append(el("span", { class: "badge badge-xs", style: `background:${GRAPH_COLORS.ip};color:#fff;border:none` }, "pivô"));
+    if (m.banned) head.append(el("span", { class: "badge badge-error badge-xs" }, "banido"));
+    if (m.cf) head.append(el("span", { class: "badge badge-warning badge-xs", title: "IP da borda Cloudflare — não é o visitante real" }, "CF"));
+    box.append(head);
+    row("Requests", fmtInt(m.requests || 0));
+    row("Status", m.status);
+    row("Domínios", m.domains);
+    row("País", m.country ? `${countryCodeToFlag(m.country)} ${m.country}` : null);
+    row("ASN/ISP", m.asn);
+    row("Sub-rede", m.subnet, { mono: true });
+    row("User-Agent", m.ua, { mono: true });
+    row("Cenários", m.scenarios);
+    row("Rotas (top)", m.top_paths, { mono: true });
+    row("1ª vez", m.first_seen ? fmtLocal(m.first_seen) : null);
+    row("Última", m.last_seen ? fmtLocal(m.last_seen) : null);
+    const btns = el("div", { class: "flex gap-2 mt-2" });
+    if (!m.is_pivot) btns.append(el("button", { class: "btn btn-xs btn-outline gap-1", onclick: () => state._graph && state._graph.opts.onPivot(node.label) }, "◎ Pivotar aqui"));
+    if (m.banned) btns.append(el("button", { class: "btn btn-xs btn-outline btn-success", onclick: () => quickUnban(node.label).then(() => loadGraph()) }, "Desbanir"));
+    else btns.append(el("button", { class: "btn btn-xs btn-error btn-outline", onclick: () => openBanModal(node.label, () => loadGraph()) }, "Banir"));
+    box.append(btns);
+  } else {
+    box.append(el("div", { class: "flex items-center gap-2 mb-1" },
+      el("span", { class: "inline-block rounded-full", style: `width:10px;height:10px;background:${graphNodeColor(node)}` }),
+      el("span", { class: "font-semibold text-xs" }, GRAPH_TYPE_LABEL[node.type] || node.type)));
+    row("Valor", m.full || node.label, { mono: node.type !== "country" });
+    row("IPs ligados", m.ips);
+    box.append(el("p", { class: "opacity-60 text-[11px] mt-2" }, "Todos os IPs ligados a este nó compartilham este atributo."));
+  }
+}
+
+// ---- Motor força-dirigido + render em canvas ----
+class GraphView {
+  constructor(canvas, data, opts = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.opts = opts;
+    this.nodes = (data.nodes || []).map((n, i) => {
+      const ang = (i / Math.max(1, data.nodes.length)) * Math.PI * 2;
+      const r = 160 + (i % 9) * 22;
+      return Object.assign({}, n, { x: Math.cos(ang) * r, y: Math.sin(ang) * r, vx: 0, vy: 0 });
+    });
+    this.byId = new Map(this.nodes.map((n) => [n.id, n]));
+    this.edges = (data.edges || []).map((e) => ({ type: e.type, s: this.byId.get(e.source), t: this.byId.get(e.target) })).filter((e) => e.s && e.t);
+    this.adj = new Map(this.nodes.map((n) => [n.id, new Set()]));
+    for (const e of this.edges) { this.adj.get(e.s.id).add(e.t.id); this.adj.get(e.t.id).add(e.s.id); }
+    this.scale = 1; this.tx = 0; this.ty = 0;
+    this.selected = null; this.hover = null; this.dragNode = null; this.panning = false;
+    this.alpha = 1; this.running = false; this._raf = null;
+    this._downPt = null; this._moved = false;
+    this._onResize = () => { this._resize(); };
+    this._ro = new ResizeObserver(this._onResize);
+    this._ro.observe(canvas);
+    this._resize();
+    this._bind();
+    this.fit();
+  }
+
+  radius(n) {
+    const w = n.weight || 1;
+    if (n.type === "ip") return Math.min(24, 6 + Math.sqrt(w) * 2.0);
+    return Math.min(22, 5 + Math.sqrt(w) * 2.6);
+  }
+
+  _resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    this.dpr = window.devicePixelRatio || 1;
+    this.W = Math.max(1, rect.width); this.H = Math.max(1, rect.height);
+    this.canvas.width = Math.round(this.W * this.dpr);
+    this.canvas.height = Math.round(this.H * this.dpr);
+  }
+
+  toWorld(sx, sy) { return { x: (sx - this.tx) / this.scale, y: (sy - this.ty) / this.scale }; }
+  toScreen(x, y) { return { x: x * this.scale + this.tx, y: y * this.scale + this.ty }; }
+
+  nodeAt(sx, sy) {
+    const w = this.toWorld(sx, sy);
+    let best = null, bestD = Infinity;
+    for (const n of this.nodes) {
+      const dx = n.x - w.x, dy = n.y - w.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const rr = this.radius(n) + 4 / this.scale;
+      if (d <= rr && d < bestD) { best = n; bestD = d; }
+    }
+    return best;
+  }
+
+  fit() {
+    if (!this.nodes.length) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of this.nodes) { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); }
+    const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+    const pad = 60;
+    this.scale = Math.min(2.5, Math.max(0.15, Math.min((this.W - pad) / w, (this.H - pad) / h)));
+    this.tx = this.W / 2 - ((minX + maxX) / 2) * this.scale;
+    this.ty = this.H / 2 - ((minY + maxY) / 2) * this.scale;
+  }
+
+  zoomBy(f, cx, cy) {
+    cx = cx == null ? this.W / 2 : cx; cy = cy == null ? this.H / 2 : cy;
+    const w = this.toWorld(cx, cy);
+    this.scale = Math.min(4, Math.max(0.1, this.scale * f));
+    this.tx = cx - w.x * this.scale; this.ty = cy - w.y * this.scale;
+  }
+
+  _bind() {
+    const c = this.canvas;
+    this._h = {};
+    c.addEventListener("mousedown", this._h.down = (e) => {
+      const r = c.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top;
+      this._downPt = { sx, sy }; this._moved = false;
+      const n = this.nodeAt(sx, sy);
+      if (n) { this.dragNode = n; c.style.cursor = "grabbing"; }
+      else { this.panning = true; this._panStart = { tx: this.tx, ty: this.ty, sx, sy }; c.style.cursor = "grabbing"; }
+      this.alpha = Math.max(this.alpha, 0.5);
+    });
+    window.addEventListener("mousemove", this._h.move = (e) => {
+      const r = c.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top;
+      if (this._downPt && (Math.abs(sx - this._downPt.sx) > 3 || Math.abs(sy - this._downPt.sy) > 3)) this._moved = true;
+      if (this.dragNode) {
+        const w = this.toWorld(sx, sy); this.dragNode.x = w.x; this.dragNode.y = w.y; this.dragNode.vx = 0; this.dragNode.vy = 0;
+        this.alpha = Math.max(this.alpha, 0.4);
+      } else if (this.panning) {
+        this.tx = this._panStart.tx + (sx - this._panStart.sx); this.ty = this._panStart.ty + (sy - this._panStart.sy);
+      } else {
+        if (sx >= 0 && sy >= 0 && sx <= this.W && sy <= this.H) {
+          const n = this.nodeAt(sx, sy); this.hover = n; c.style.cursor = n ? "pointer" : "grab";
+        }
+      }
+    });
+    window.addEventListener("mouseup", this._h.up = () => {
+      if (this.dragNode && !this._moved) { this._select(this.dragNode); }
+      else if (this.panning && !this._moved) { this._select(null); }
+      this.dragNode = null; this.panning = false; this._downPt = null; c.style.cursor = "grab";
+    });
+    c.addEventListener("wheel", this._h.wheel = (e) => {
+      e.preventDefault();
+      const r = c.getBoundingClientRect();
+      this.zoomBy(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+  }
+
+  _select(n) {
+    this.selected = n;
+    if (n && this.opts.onSelect) this.opts.onSelect(n);
+  }
+
+  _isNeighbor(n) {
+    if (!this.selected) return false;
+    if (n === this.selected) return true;
+    return this.adj.get(this.selected.id) && this.adj.get(this.selected.id).has(n.id);
+  }
+
+  step() {
+    const a = this.alpha, nodes = this.nodes;
+    for (const n of nodes) { n._fx = 0; n._fy = 0; }
+    // repulsão O(n²) (ok até ~300 nós)
+    for (let i = 0; i < nodes.length; i++) {
+      const A = nodes[i];
+      for (let j = i + 1; j < nodes.length; j++) {
+        const B = nodes[j];
+        let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy;
+        if (d2 < 1) { dx = (i - j) || 1; dy = (i + 1); d2 = dx * dx + dy * dy; }
+        const d = Math.sqrt(d2), f = 3500 / d2;
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        A._fx += fx; A._fy += fy; B._fx -= fx; B._fy -= fy;
+      }
+    }
+    // molas nas arestas
+    for (const e of this.edges) {
+      const A = e.s, B = e.t;
+      let dx = B.x - A.x, dy = B.y - A.y; const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const f = (d - 92) * 0.03; const fx = (dx / d) * f, fy = (dy / d) * f;
+      A._fx += fx; A._fy += fy; B._fx -= fx; B._fy -= fy;
+    }
+    // gravidade ao centro (0,0) + integração
+    for (const n of nodes) {
+      n._fx += -n.x * 0.012; n._fy += -n.y * 0.012;
+      if (n === this.dragNode) { n.vx = 0; n.vy = 0; continue; }
+      n.vx = (n.vx + n._fx * a) * 0.86; n.vy = (n.vy + n._fy * a) * 0.86;
+      const sp = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
+      if (sp > 30) { n.vx = (n.vx / sp) * 30; n.vy = (n.vy / sp) * 30; }
+      n.x += n.vx; n.y += n.vy;
+    }
+    this.alpha = Math.max(0.02, this.alpha * 0.99);
+  }
+
+  draw() {
+    const ctx = this.ctx;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, this.W, this.H);
+    ctx.fillStyle = VIZ.surface(); ctx.fillRect(0, 0, this.W, this.H);
+    ctx.save(); ctx.translate(this.tx, this.ty); ctx.scale(this.scale, this.scale);
+    // arestas
+    const axis = VIZ.axis();
+    ctx.lineWidth = 1 / this.scale;
+    for (const e of this.edges) {
+      const hot = this.selected && (e.s === this.selected || e.t === this.selected);
+      ctx.strokeStyle = hot ? graphNodeColor(this.selected) : axis;
+      ctx.globalAlpha = hot ? 0.85 : (this.selected ? 0.12 : 0.38);
+      ctx.beginPath(); ctx.moveTo(e.s.x, e.s.y); ctx.lineTo(e.t.x, e.t.y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // nós
+    for (const n of this.nodes) {
+      const r = this.radius(n);
+      const dim = this.selected && !this._isNeighbor(n);
+      ctx.globalAlpha = dim ? 0.22 : 1;
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = graphNodeColor(n); ctx.fill();
+      if (n.meta && n.meta.is_pivot) { ctx.lineWidth = 3.5 / this.scale; ctx.strokeStyle = VIZ.ink2(); ctx.stroke(); }
+      else if (n === this.selected || n === this.hover) { ctx.lineWidth = 2 / this.scale; ctx.strokeStyle = VIZ.ink2(); ctx.stroke(); }
+    }
+    ctx.restore();
+    // rótulos em espaço de tela (fonte de tamanho fixo)
+    ctx.globalAlpha = 1; ctx.fillStyle = VIZ.ink2();
+    ctx.font = "11px ui-sans-serif, system-ui, sans-serif"; ctx.textBaseline = "middle";
+    for (const n of this.nodes) {
+      const r = this.radius(n);
+      const important = n.type === "ip" || r * this.scale > 11 || n === this.hover || n === this.selected || this._isNeighbor(n);
+      if (!important) continue;
+      if (this.selected && !this._isNeighbor(n)) continue;
+      const s = this.toScreen(n.x, n.y);
+      if (s.x < -80 || s.x > this.W + 80 || s.y < -20 || s.y > this.H + 20) continue;
+      ctx.fillStyle = VIZ.ink2();
+      ctx.fillText(n.label, s.x + r * this.scale + 4, s.y);
+    }
+  }
+
+  _loop() {
+    if (!this.running) return;
+    if (this.canvas.offsetParent === null) { this.running = false; return; } // aba oculta → pausa
+    this.step(); this.draw();
+    this._raf = requestAnimationFrame(() => this._loop());
+  }
+  start() { if (this.running) return; this.running = true; this.alpha = Math.max(this.alpha, 0.9); this._loop(); }
+  resume() { if (!this.running) { this.running = true; this.alpha = Math.max(this.alpha, 0.3); this._loop(); } }
+  pause() { this.running = false; if (this._raf) cancelAnimationFrame(this._raf); }
+  destroy() {
+    this.pause();
+    if (this._ro) this._ro.disconnect();
+    window.removeEventListener("mousemove", this._h.move);
+    window.removeEventListener("mouseup", this._h.up);
+  }
 }
 
 function wireEvents() {
