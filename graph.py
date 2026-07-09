@@ -49,14 +49,17 @@ _ASSET_EXT = re.compile(
     re.IGNORECASE,
 )
 
-# Padrões clássicos de sondagem/exploração. Um path que casa aqui é sempre
-# tratado como "rota de scan" (mesmo que só 1 IP tenha tocado), pois o valor
-# investigativo é alto.
+# Padrões clássicos de sondagem/exploração. SÓ um path que casa aqui vira "rota
+# de scan" — deliberadamente conservador. Um fallback genérico ("qualquer path
+# não-asset compartilhado") marcaria rotas LEGÍTIMAS de app (ex.: /api/...,
+# /dashboard, /transactions?_rsc=...) como scan; por isso não existe fallback.
 _SCAN_HINTS = re.compile(
-    r"(?:/\.env|/\.git|/\.aws|/\.ssh|wp-login|wp-admin|xmlrpc\.php|phpmyadmin|"
-    r"phpunit|/vendor/|/actuator|/solr|/boaform|/cgi-bin|/shell|/administrator|"
-    r"eval-stdin|/config\.|/\.well-known/|/owa/|/manager/html|/druid/|"
-    r"/console|/_ignition|/telescope|\.php$|/api/.*(?:token|key|secret))",
+    r"(?:/\.env|/\.git|/\.aws|/\.ssh|/\.svn|/\.hg|/\.DS_Store|wp-login|wp-admin|"
+    r"wp-config|xmlrpc\.php|phpmyadmin|phpunit|/vendor/|/actuator|/solr|/boaform|"
+    r"/cgi-bin|/shell|/administrator|eval-stdin|/owa/|/autodiscover|/manager/html|"
+    r"/druid/|/_ignition|/telescope|\.php(?:$|\?)|/onvif|mstshash|%2e%2e|/HNAP1|"
+    r"/GponForm|/setup\.cgi|/struts|/config\.php|\.(?:sql|bak|old|save|swp)(?:$|\?)|"
+    r"/backup|/dump|/\.aws/|/\.env\.)",
     re.IGNORECASE,
 )
 
@@ -118,16 +121,12 @@ def _is_asset(path: str | None) -> bool:
     return bool(path) and bool(_ASSET_EXT.search(path))
 
 
-def _looks_like_scan(path: str | None, ip_count: int, min_shared: int) -> bool:
-    """Um path é 'rota de scan' se casa um padrão de sondagem, OU se é um path
-    não-asset (e não a raiz) tocado por >= min_shared IPs distintos."""
+def _looks_like_scan(path: str | None) -> bool:
+    """Um path é 'rota de scan' SÓ se casa um padrão de sondagem conhecido.
+    Sem fallback genérico — rotas legítimas de app não devem virar 'scan'."""
     if not path or path in ("/", ""):
         return False
-    if _SCAN_HINTS.search(path):
-        return True
-    if not _is_asset(path) and ip_count >= max(2, min_shared):
-        return True
-    return False
+    return bool(_SCAN_HINTS.search(path))
 
 
 def _ua_id(ua: str) -> str:
@@ -318,7 +317,7 @@ def build_graph(
                     if o != pivot:
                         siblings[o].add(f"/24 {sub}")
         for path, ips in path_ips.items():
-            if pivot in ips and _looks_like_scan(path, len(ips), min_shared):
+            if pivot in ips and _looks_like_scan(path):
                 for o in ips:
                     if o != pivot:
                         siblings[o].add("rota de scan")
@@ -422,7 +421,7 @@ def build_graph(
         ips = eligible(ips_all)
         if not ips:
             continue
-        if not _looks_like_scan(path, len(ips), min_shared):
+        if not _looks_like_scan(path):
             continue
         if scan_added >= 30 and not (pivot and pivot in ips):
             continue
